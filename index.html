@@ -64,7 +64,7 @@
   input[type=checkbox] { width:24px; height:24px; min-height:0; flex:none; accent-color:var(--accent); }
   .btn { display:inline-flex; align-items:center; justify-content:center; text-decoration:none; background:var(--accent); color:var(--on-accent); border:0; border-radius:12px; padding:var(--s3) var(--s4); min-height:var(--tap); font:inherit; font-weight:700; }
   .btn.act { background:var(--action); color:var(--on-action); }
-  button.ghost, a.ghost { display:inline-flex; align-items:center; background:none; border:1px solid var(--line); color:var(--ink); border-radius:12px; padding:var(--s2) var(--s3); min-height:var(--tap); font:inherit; font-size:14px; font-weight:600; }
+  button.ghost, a.ghost, label.ghost { display:inline-flex; align-items:center; background:none; border:1px solid var(--line); color:var(--ink); border-radius:12px; padding:var(--s2) var(--s3); min-height:var(--tap); font:inherit; font-size:14px; font-weight:600; }
   button.x { background:none; border:0; color:var(--muted); font-size:22px; min-width:var(--tap); min-height:var(--tap); padding:var(--s1) var(--s2); }
   .big { font-size:32px; font-weight:800; letter-spacing:-.02em; }
   .neg { color:var(--warn); }
@@ -864,6 +864,8 @@
   .hero-b.near { border-color:var(--c-activities); }
   .hero-b.over { border-color:var(--warn); }
   .bignum.sm { font-size:30px; margin-top:var(--s1); }
+  .lastbk { display:inline-block; padding:4px 10px; border-radius:8px; background:var(--ok-bg); color:var(--ok-ink); font-size:13px; font-weight:700; }
+  .lastbk.stale { background:var(--warn-bg); color:var(--warn); }
   .hist { display:flex; flex-direction:column; margin-top:var(--s2); }
   .hrow { display:grid; grid-template-columns:76px 1fr auto; align-items:center; gap:var(--s3); min-height:var(--tap); padding:4px var(--s2); margin:0 calc(-1 * var(--s2));
     border:0; border-top:1px solid var(--line); border-radius:0; background:none; color:var(--ink); font:inherit; font-size:14px; text-align:left; }
@@ -3437,6 +3439,53 @@ async function importPhotos(file) {
   } catch (e) { alert('That file could not be read.'); }
 }
 
+/* ---- Your data: expenses as CSV, and a full backup file to restore everything ---- */
+async function photoDump() {
+  const db = await idb();
+  return new Promise((res, rej) => { const o = {}; const q = db.transaction('photos').objectStore('photos').openCursor();
+    q.onsuccess = () => { const c = q.result; if (c) { o[c.key] = c.value; c.continue(); } else res(o); }; q.onerror = () => rej(q.error); });
+}
+// On a phone, open the share sheet (save to Files or Drive, email it); elsewhere, download
+function saveFile(name, text, type) {
+  const file = new File([text], name, {type});
+  if (/Android|iPhone|iPad|Mobi/.test(navigator.userAgent) && navigator.canShare && navigator.canShare({files: [file]}))
+    return navigator.share({files: [file], title: name}).catch(() => {});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+function expensesCsv() {
+  const q = v => { const s = String(v ?? ''); return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const head = ['Date', 'Prepaid', 'Category', 'What', 'Amount', 'Currency', 'R$', 'COP', 'Paid with', 'COP with card fee', 'Spread part'];
+  const rows = state.expenses.slice().sort((a, b) => (a.date || '').localeCompare(b.date || '')).map(e => [
+    e.date || '', e.prepaid ? 'yes' : '', catOf(e)[1], e.note || '', e.cur === 'COP' ? e.cop : e.amt, e.cur === 'COP' ? 'COP' : 'BRL',
+    expBRL(e).toFixed(2), Math.round(expCOP(e)), PAY_LABEL[e.pay] || '', withFee(e) > 1 ? Math.round(expCOP(e) * withFee(e)) : '', e.group ? `${e.part} of ${e.parts}` : '']);
+  return '﻿' + [head, ...rows].map(r => r.map(q).join(',')).join('\r\n');   // BOM so spreadsheets read accents correctly
+}
+async function makeBackup(withPhotos) {
+  state.lastBackup = brazilToday(); save();
+  const out = {app: 'brazil-trip', version: 1, exported: new Date().toISOString(), state,
+    coords: JSON.parse(localStorage.getItem('trip-coords-v1') || '{}'), routes: JSON.parse(localStorage.getItem('trip-routes-v1') || '{}')};
+  if (withPhotos) { try { out.photos = await photoDump(); } catch (e) {} }
+  ui.backupMsg = 'Backup file made' + (withPhotos ? ', with photos.' : '.');
+  render();
+  saveFile(`brazil-trip-backup-${brazilToday()}.json`, JSON.stringify(out), 'application/json');
+}
+async function restoreBackup(file) {
+  let j; try { j = JSON.parse(await file.text()); } catch (e) { ui.backupMsg = "That file couldn't be read."; render(); return; }
+  if (j && j.trip === 1 && j.data) { ui.backupMsg = 'That is a photo pack. Import it from the Photos card in Explore.'; render(); return; }
+  if (!j || j.app !== 'brazil-trip' || !j.state) { ui.backupMsg = "That isn't a Brazil Trip backup file."; render(); return; }
+  if (!confirm(`Replace everything in this app with the backup from ${new Date(j.exported).toLocaleString('en-US', {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}?`)) return;
+  try {
+    localStorage.setItem('trip-state-v1', JSON.stringify(j.state));
+    if (j.coords) localStorage.setItem('trip-coords-v1', JSON.stringify(j.coords));
+    if (j.routes) localStorage.setItem('trip-routes-v1', JSON.stringify(j.routes));
+    if (j.photos) for (const [k, v] of Object.entries(j.photos)) await photosSet(k, v);
+    state = load();
+    ui.backupMsg = `Restored the backup from ${shortDate(j.exported.slice(0, 10))}` + (j.photos ? ', with photos.' : '.');
+  } catch (e) { ui.backupMsg = "Couldn't restore everything (the phone may be out of space)."; }
+  render();
+}
+
 // Each expense keeps the currency it was typed in: R$ ones have "amt"; COP ones have cur:"COP" and "cop",
 // and their R$ value follows the current exchange rate
 const expBRL = e => e.cur === "COP" ? (state.rate > 0 ? e.cop / state.rate : 0) : e.amt;
@@ -3736,7 +3785,11 @@ function renderBudget() {
         <span><b>Carry leftovers to the next day</b><span class="muted">When a day ends, money you didn't spend is added to the next day, and overspending is taken off it.</span></span></label>
       <p class="muted">The default applies to every day without its own budget. Tap "Update" at the top of Budget for today's rate, or type your own (for example your bank's rate).
         Rates by <a href="https://www.exchangerate-api.com" target="_blank" rel="noopener">Exchange Rate API</a>.</p>
-    </details>`;
+    </details>
+    <div class="card"><div class="row"><b class="grow">Your expenses as a spreadsheet</b></div>
+      <div class="muted" style="margin:2px 0 var(--s2)">A CSV file with every expense in R$ and COP, for Google Sheets, Excel or Numbers. For a full backup of the whole app, use "Back up your trip" in Docs.</div>
+      <button class="ghost" data-act="exportCsv">Export expenses (CSV)</button>
+    </div>`;
 }
 
 /* ---- Plan tab: daily schedule (timeline or list) ---- */
@@ -4148,6 +4201,24 @@ function renderPlan() {
     </div>`;
 }
 
+// Docs, bottom: back up / restore all app data
+function renderBackupCard() {
+  const last = state.lastBackup, age = last ? Math.round((new Date(brazilToday()) - new Date(last)) / 864e5) : null;
+  const hasData = state.expenses.length || Object.keys(state.plan).length || Object.keys(state.notes).length || state.docs.some(d => d.conf);
+  const stale = hasData && (!last || age > 3);
+  return `<div class="card backup">
+    <div class="doc-h"><span class="doc-ic">${ic('copy')}</span><div class="grow"><b>Back up your trip</b>
+      <div class="muted">Plans, budget, documents and notes live only in this browser. Save a backup file now and then, and before you fly.</div></div></div>
+    <div class="lastbk ${stale ? 'stale' : ''}">${last ? `Last backup: ${shortDate(last)}${age > 0 ? ` (${age} day${age === 1 ? '' : 's'} ago)` : ' (today)'}` : 'No backup yet'}</div>
+    ${ui.backupMsg ? `<div class="muted" role="status" style="margin-top:var(--s2)">${esc(ui.backupMsg)}</div>` : ''}
+    <label class="check" style="border-top:0"><input type="checkbox" id="bkPhotos"><span>Include photos <span class="muted">(much bigger file)</span></span></label>
+    <div class="row" style="flex-wrap:wrap;margin-top:var(--s1)">
+      <button class="ghost" data-act="backup">Save backup file</button>
+      <label class="ghost" style="cursor:pointer">Restore from a backup<input type="file" accept=".json,application/json" hidden data-act="restoreFile"></label>
+    </div>
+    <div class="muted" style="margin-top:var(--s2)">On a phone this opens the share menu: save it to Files or Google Drive, or email it to yourself. Restoring replaces what's in the app now.</div>
+  </div>`;
+}
 function renderDocs() {
   const usedIn = d => { const u = docUses(d.id); return u.length ? `<div class="ilabel" style="margin-top:var(--s2)">Used in your plan</div>
       <div class="chips">${u.map(x => `<button class="chip" data-act="goPlanDay" data-v="${x.date}">${dayLabel(x.date)} · ${esc(itemName(x.it))}</button>`).join('')}</div>` : ''; };
@@ -4178,7 +4249,8 @@ function renderDocs() {
   return (cards || empty) + `<div class="card"><label class="muted" for="newDoc">New document</label>
       <input id="newDoc" placeholder="e.g. Travel insurance">
       <button class="btn act wide" data-act="addDoc">Add document</button></div>
-    <p class="muted">Everything here is stored only on this phone. Confirmation codes are fine; skip passport numbers if you'd rather not keep them here.</p>`;
+    <p class="muted">Everything here is stored only on this phone. Confirmation codes are fine; skip passport numbers if you'd rather not keep them here.</p>
+    ${renderBackupCard()}`;
 }
 
 function render() {
@@ -4353,6 +4425,8 @@ const actions = {
     (state.wallet ||= []).push({id: uid(), date: brazilToday(), amt: v, note: document.getElementById('cashNote').value.trim()});
   },
   delCash: t => { state.wallet = (state.wallet || []).filter(w => w.id !== t.dataset.id); },
+  exportCsv: () => { saveFile(`brazil-trip-expenses-${brazilToday()}.csv`, expensesCsv(), 'text/csv'); return false; },
+  backup: () => { makeBackup(document.getElementById('bkPhotos').checked); return false; },
   toggleCarry: () => { state.carry = !state.carry; },
   getRate: () => { if (!ui.rateBusy) fetchRate(); return false; },
   resetDayBudget: t => { if (state.dayBudgets) delete state.dayBudgets[t.dataset.v]; },
@@ -4401,6 +4475,7 @@ document.getElementById('main').addEventListener('change', e => {
     if (v >= 0) state.dayBudgets[t.dataset.v] = v; else delete state.dayBudgets[t.dataset.v]; save(); render(); }
   else if (a === 'expDate') { ui.expDate = t.value; render(); }
   else if (a === 'setNote') { state.notes[t.dataset.id] = t.value; save(); }
+  else if (a === 'restoreFile') { if (t.files[0]) restoreBackup(t.files[0]); t.value = ''; }
   else if (a === 'importPhotos') { importPhotos(t.files[0]); t.value = ''; }
   else if (a === 'setDoc') { const i = findPlanItem(t.dataset.id); if (i) { if (t.value) i.docId = t.value; else delete i.docId; } save(); render(); }
   else if (a === 'setWorkS' || a === 'setWorkE') { state.work = Object.assign({s:'10:00', e:'18:00'}, state.work); state.work[a === 'setWorkS' ? 's' : 'e'] = t.value || state.work[a === 'setWorkS' ? 's' : 'e']; save(); render(); }

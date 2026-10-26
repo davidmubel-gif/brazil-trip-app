@@ -29,6 +29,11 @@ So these files contain no personal data and are safe to put online, but a phone 
 each keep their own separate copy of your data. Photos can be moved between devices with the
 "photo pack" export/import.
 
+**Back up now and then.** Clearing the browser's data, or removing the app from the home screen,
+deletes everything in it. In the Docs tab, "Back up your trip" saves one file with all your data
+(optionally with photos); "Restore from a backup" brings it back, on the same or another device.
+The Budget tab can also export your expenses as a CSV file for a spreadsheet.
+
 ## The files
 
 | File | What it is |
