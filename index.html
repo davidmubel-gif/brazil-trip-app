@@ -857,6 +857,15 @@
   .bar { height:10px; border-radius:999px; background:var(--soft); overflow:hidden; margin:var(--s3) 0 var(--s1); }
   .bar i { display:block; height:100%; border-radius:999px; background:var(--accent); }
   .bar.over i { background:var(--warn); }
+  .daybud { border-top:1px solid var(--line); margin-top:var(--s3); padding-top:var(--s3); }
+  .daybud .row { margin:4px 0 2px; }
+  .daybud input { flex:1; min-width:0; width:auto; }
+  .daybud .tag { flex:none; }
+  .tripline { display:flex; justify-content:space-between; align-items:baseline; margin-top:var(--s2); }
+  .tripline b { font-size:20px; }
+  .perday { display:flex; gap:var(--s3); align-items:flex-start; margin-top:var(--s3); padding:var(--s3); border-radius:12px; background:var(--ok-bg); color:var(--ink); }
+  .perday .ri { margin:0; }
+  .perday.neg { background:var(--warn-bg); color:var(--warn); }
   .exp { display:flex; align-items:center; gap:var(--s3); padding:var(--s2) 0; border-top:1px solid var(--line); }
   .exp:first-of-type { border-top:0; }
   .exp > .ri { margin:0; }
@@ -3360,30 +3369,49 @@ async function importPhotos(file) {
 
 function spentOn(date) { return state.expenses.filter(e => e.date === date).reduce((s,e) => s + e.amt, 0); }
 
+// Budgets: a default daily amount, optional per-day overrides, and a trip total that follows
+// "daily × days" until you set it yourself
+const dayBudget = d => (state.dayBudgets && state.dayBudgets[d] !== undefined) ? state.dayBudgets[d] : state.daily;
+const tripBudget = () => state.tripBudget !== undefined ? state.tripBudget : state.daily * tripDays().length;
+const brazilToday = () => new Date(Date.now() - 3*3600*1000).toISOString().slice(0,10); // Brazil date (UTC-3)
+const cop = v => '≈ COP ' + money(v * state.rate);
 function renderBudget() {
   const days = tripDays();
-  const todayIso = new Date(Date.now() - 3*3600*1000).toISOString().slice(0,10); // Brazil date (UTC-3)
-  const selDate = ui.expDate || (days.includes(todayIso) ? todayIso : days[0]);
-  const spentDay = spentOn(selDate);
-  const leftDay = state.daily - spentDay;
-  const totalAllow = state.daily * days.length;
+  const todayIso = brazilToday();
+  const selDate = ui.expDate && days.includes(ui.expDate) ? ui.expDate : (days.includes(todayIso) ? todayIso : days[0]);
+  const spentDay = spentOn(selDate), budDay = dayBudget(selDate), custom = state.dayBudgets && state.dayBudgets[selDate] !== undefined;
+  const leftDay = budDay - spentDay;
+  const trip = tripBudget(), sumDays = days.reduce((s, d) => s + dayBudget(d), 0);
   const totalSpent = state.expenses.reduce((s,e) => s + e.amt, 0);
-  const totalLeft = totalAllow - totalSpent;
+  const totalLeft = trip - totalSpent;
+  // the days still ahead, today included (all of them before the trip, none after it)
+  const ahead = todayIso < days[0] ? days : days.filter(d => d >= todayIso);
+  const perDay = ahead.length ? totalLeft / ahead.length : null;
+  const mismatch = Math.abs(sumDays - trip) >= 1;
+  const shortDay = d => new Date(d + 'T12:00:00').toLocaleDateString('en-US', {weekday:'short', day:'numeric'});
+  const chips = days.map(d => `<button class="chip ${d === selDate ? 'on' : ''}" data-act="budgetDay" data-v="${d}">${shortDay(d)}${state.expenses.some(e => e.date === d) ? '<span class="dot"></span>' : ''}</button>`).join('');
   const dayOpts = days.map(d => `<option value="${d}" ${d===selDate?'selected':''}>${dayLabel(d)}</option>`).join('');
   // share of the allowance used, for the progress bars
   const bar = (spent, of) => { const p = of > 0 ? Math.min(100, spent / of * 100) : 0;
     return `<div class="bar ${spent > of ? 'over' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(p)}"><i style="width:${p}%"></i></div>`; };
   const log = state.expenses.filter(e => e.date === selDate).map(e => `
     <div class="exp">${ic('receipt')}
-      <div class="grow">${esc(e.note||'Expense')}<div class="muted">≈ COP ${money(e.amt*state.rate)}</div></div>
+      <div class="grow">${esc(e.note||'Expense')}<div class="muted">${cop(e.amt)}</div></div>
       <b>${brl(e.amt)}</b><button class="x" data-act="delExp" data-id="${e.id}" aria-label="Delete expense ${esc(e.note || brl(e.amt))}">×</button></div>`).join('');
   return `
+    <div class="chips nowrap" id="daychips">${chips}</div>
     <div class="card hero-b">
       <div class="muted">${selDate === todayIso ? 'Left today' : 'Left for ' + dayLabel(selDate)}</div>
       <div class="bignum ${leftDay<0?'neg':''}">${brl(leftDay)}</div>
-      <div class="muted">≈ COP ${money(leftDay*state.rate)}</div>
-      ${bar(spentDay, state.daily)}
-      <div class="muted">Spent ${brl(spentDay)} of ${brl(state.daily)}</div>
+      <div class="muted">${cop(leftDay)}</div>
+      ${bar(spentDay, budDay)}
+      <div class="muted">Spent ${brl(spentDay)} of ${brl(budDay)}</div>
+      <div class="daybud">
+        <label class="muted" for="dayBud">Budget for this day (R$)</label>
+        <div class="row"><input id="dayBud" type="number" inputmode="decimal" min="0" value="${budDay}" data-act="setDayBudget" data-v="${selDate}">
+          ${custom ? `<button class="ghost" data-act="resetDayBudget" data-v="${selDate}">Use default</button>` : '<span class="tag">Default</span>'}</div>
+        <div class="muted">${cop(budDay)}</div>
+      </div>
     </div>
     <div class="card"><b>Log an expense</b>
       <div class="grid2" style="margin-top:var(--s2)">
@@ -3398,16 +3426,25 @@ function renderBudget() {
     </div>
     <div class="card">
       <div class="row"><b class="grow">Whole trip</b><span class="muted">${days.length} days</span></div>
-      ${bar(totalSpent, totalAllow)}
-      <div class="muted">Spent ${brl(totalSpent)} of ${brl(totalAllow)}</div>
-      <div class="${totalLeft<0?'neg':''}" style="margin-top:var(--s1)"><b>Left: ${brl(totalLeft)}</b> <span class="muted">≈ COP ${money(totalLeft*state.rate)}</span></div>
+      <div class="tripline"><span class="muted">Trip budget</span><b>${brl(trip)}</b></div>
+      <div class="muted" style="text-align:right">${cop(trip)}</div>
+      ${bar(totalSpent, trip)}
+      <div class="muted">Spent ${brl(totalSpent)} of ${brl(trip)}</div>
+      <div class="${totalLeft<0?'neg':''}" style="margin-top:var(--s1)"><b>Left: ${brl(totalLeft)}</b> <span class="muted">${cop(totalLeft)}</span></div>
+      ${perDay !== null ? `<div class="perday ${perDay < 0 ? 'neg' : ''}">${ic('cal')}<div><b>About ${brl(perDay)} a day</b> for the ${ahead.length} day${ahead.length === 1 ? '' : 's'} left${ahead.length < days.length ? ', today included' : ''}
+        <div class="muted">${cop(perDay)} a day</div></div></div>` : '<div class="muted" style="margin-top:var(--s2)">The trip is over.</div>'}
+      ${mismatch && sumDays > trip ? `<div class="ag-warn" style="margin-top:var(--s3)">${ic('warn')}<span>Your day budgets add up to ${brl(sumDays)}, ${brl(sumDays - trip)} more than the trip budget.</span></div>` : ''}
+      ${mismatch && sumDays < trip ? `<div class="muted" style="margin-top:var(--s3)">${brl(trip - sumDays)} of the trip budget isn't given to any day yet (your day budgets add up to ${brl(sumDays)}).</div>` : ''}
+      ${mismatch ? `<button class="ghost" style="margin-top:var(--s2)" data-act="matchTrip">Set trip budget to ${brl(sumDays)}</button>` : ''}
     </div>
-    <details class="card dt settings"><summary><b>Settings</b><span class="muted">${brl(state.daily)} a day · ${money(state.rate)} COP per R$</span>${ic('chev', 'ri chev')}</summary>
+    <details class="card dt settings"><summary><b>Settings</b><span class="muted">${brl(trip)} trip · ${brl(state.daily)} a day · ${money(state.rate)} COP per R$</span>${ic('chev', 'ri chev')}</summary>
+      <label class="muted" style="display:block">Trip budget (R$)<input id="setTrip" type="number" inputmode="decimal" min="0" value="${trip}" data-act="setTrip"></label>
+      <div class="muted" style="margin:2px 0 var(--s2)">${cop(trip)}${state.tripBudget === undefined ? ' · follows the daily budget × ' + days.length + ' days until you change it' : ''}</div>
       <div class="grid2">
-        <label class="muted">Daily allowance (R$)<input id="setDaily" type="number" inputmode="decimal" value="${state.daily}" data-act="setDaily"></label>
+        <label class="muted">Default daily budget (R$)<input id="setDaily" type="number" inputmode="decimal" min="0" value="${state.daily}" data-act="setDaily"></label>
         <label class="muted">COP per 1 R$<input id="setRate" type="number" inputmode="decimal" value="${state.rate}" data-act="setRate"></label>
       </div>
-      <p class="muted">Update the exchange rate to today's before you go (check Google or your bank).</p>
+      <p class="muted">The default applies to every day without its own budget. Update the exchange rate to today's before you go (check Google or your bank).</p>
     </details>`;
 }
 
@@ -3860,7 +3897,7 @@ function render() {
   document.getElementById('main').innerHTML = fn() + (tab === 'plan' ? renderDocSheet() + renderTimeSheet() : '');
   if (tab === 'explore' && ui.detail) refreshPhotos();
   // centre the chosen day chip by scrolling the chip row sideways only (scrollIntoView also scrolled the page up)
-  if (tab === 'plan') { const c = document.querySelector('#daychips .chip.on'), row = document.getElementById('daychips');
+  if (tab === 'plan' || tab === 'budget') { const c = document.querySelector('#daychips .chip.on'), row = document.getElementById('daychips');
     if (c && row) row.scrollLeft = c.offsetLeft - row.offsetLeft - (row.clientWidth - c.offsetWidth) / 2; }
   if (tab === 'plan' && document.getElementById('map')) initMap(); else if (leafMap) { try { leafMap.remove(); } catch (e) {} leafMap = null; }
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
@@ -3959,6 +3996,9 @@ const actions = {
     const amt = parseFloat(document.getElementById('expAmt').value); if (!(amt > 0)) return false;
     state.expenses.push({id:uid(), date:document.getElementById('expDate').value, amt, note:document.getElementById('expNote').value.trim()});
   },
+  budgetDay: t => { ui.expDate = t.dataset.v; },
+  resetDayBudget: t => { if (state.dayBudgets) delete state.dayBudgets[t.dataset.v]; },
+  matchTrip: () => { state.tripBudget = tripDays().reduce((s, d) => s + dayBudget(d), 0); },
   delExp: t => { state.expenses = state.expenses.filter(e => e.id !== t.dataset.id); },
   planDay: t => { ui.planDay = t.dataset.v; },
   addPlanSaved: () => { const v = document.getElementById('planPick').value; if (!v) return false; addPlan({actId:v}); },
@@ -3997,6 +4037,9 @@ document.getElementById('main').addEventListener('change', e => {
   if (a === 'setConf') { state.docs.find(d => d.id === t.dataset.id).conf = t.value.trim(); save(); }
   else if (a === 'setDaily') { state.daily = parseFloat(t.value) || 0; save(); render(); }
   else if (a === 'setRate') { state.rate = parseFloat(t.value) || 0; save(); render(); }
+  else if (a === 'setTrip') { const v = parseFloat(t.value); if (v >= 0) state.tripBudget = v; else delete state.tripBudget; save(); render(); }
+  else if (a === 'setDayBudget') { const v = parseFloat(t.value); state.dayBudgets = state.dayBudgets || {};
+    if (v >= 0) state.dayBudgets[t.dataset.v] = v; else delete state.dayBudgets[t.dataset.v]; save(); render(); }
   else if (a === 'expDate') { ui.expDate = t.value; render(); }
   else if (a === 'setNote') { state.notes[t.dataset.id] = t.value; save(); }
   else if (a === 'importPhotos') { importPhotos(t.files[0]); t.value = ''; }
