@@ -860,6 +860,25 @@
   .bar { height:10px; border-radius:999px; background:var(--soft); overflow:hidden; margin:var(--s3) 0 var(--s1); }
   .bar i { display:block; height:100%; border-radius:999px; background:var(--accent); }
   .bar.over i { background:var(--warn); }
+  .bar.near i { background:var(--c-activities); }
+  .hero-b.near { border-color:var(--c-activities); }
+  .hero-b.over { border-color:var(--warn); }
+  .hist { display:flex; flex-direction:column; margin-top:var(--s2); }
+  .hrow { display:grid; grid-template-columns:76px 1fr auto; align-items:center; gap:var(--s3); min-height:var(--tap); padding:4px var(--s2); margin:0 calc(-1 * var(--s2));
+    border:0; border-top:1px solid var(--line); border-radius:0; background:none; color:var(--ink); font:inherit; font-size:14px; text-align:left; }
+  .hrow:first-child { border-top:0; }
+  .hrow .bar { margin:0; height:8px; }
+  .hrow.sel { background:var(--ok-bg); border-radius:10px; }
+  .hrow.future { color:var(--muted); }
+  .hday { display:flex; flex-direction:column; align-items:flex-start; gap:2px; font-weight:700; }
+  .hday .tag { font-size:11px; padding:1px 6px; }
+  .hamt { text-align:right; white-space:nowrap; }
+  .hamt.near b { color:var(--ink); }
+  .hamt.over b { color:var(--warn); }
+  .daymsg { display:flex; gap:var(--s2); align-items:flex-start; margin-top:var(--s2); padding:8px 10px; border-radius:8px; background:var(--warn-bg); color:var(--warn); font-size:14px; font-weight:600; }
+  .daymsg .ri { width:18px; height:18px; margin:1px 0 0; stroke:currentColor; }
+  .daymsg.near { background:var(--soft); color:var(--ink); }
+  .daymsg.near .ri { stroke:var(--c-activities); }
   .daybud { border-top:1px solid var(--line); margin-top:var(--s3); padding-top:var(--s3); }
   .daybud .row { margin:4px 0 2px; }
   .daybud input { flex:1; min-width:0; width:auto; }
@@ -3551,6 +3570,11 @@ function renderBudget() {
   // what this day really has to spend: its own budget plus any carry-over from finished days
   const availDay = dayAvailable(selDate), carryIn = availDay - budDay;
   const leftDay = availDay - spentDay;
+  // gentle warnings: amber from 80% of the day's money, deeper amber once it's gone over
+  const level = availDay > 0 && spentDay > availDay ? 'over' : availDay > 0 && spentDay >= availDay * 0.8 ? 'near' : (availDay <= 0 && spentDay > 0 ? 'over' : '');
+  const which = selDate === todayIso ? "today's" : "this day's";
+  const dayMsg = level === 'over' ? `You've gone over ${which} budget by ${brl(spentDay - availDay)}.`
+    : level === 'near' ? `You've used ${Math.round(spentDay / availDay * 100)}% of ${which} budget. ${brl(leftDay)} left.` : '';
   const trip = tripBudget(), sumDays = days.reduce((s, d) => s + dayBudget(d), 0);
   const totalSpent = state.expenses.reduce((s,e) => s + expBRL(e), 0);
   const totalLeft = trip - totalSpent;
@@ -3566,7 +3590,7 @@ function renderBudget() {
   const dayOpts = days.map(d => `<option value="${d}" ${d===selDate?'selected':''}>${dayLabel(d)}</option>`).join('');
   // share of the allowance used, for the progress bars
   const bar = (spent, of) => { const p = of > 0 ? Math.min(100, spent / of * 100) : 0;
-    return `<div class="bar ${spent > of ? 'over' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(p)}"><i style="width:${p}%"></i></div>`; };
+    return `<div class="bar ${spent > of ? 'over' : of > 0 && spent >= of * 0.8 ? 'near' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(p)}"><i style="width:${p}%"></i></div>`; };
   const log = state.expenses.filter(e => e.date === selDate).map(e => `
     <div class="exp">${catIc(catOf(e))}
       <div class="grow">${esc(e.note || catOf(e)[1])}${e.note || e.group ? `<div class="muted">${e.note ? catOf(e)[1] : ''}${e.note && e.group ? ' · ' : ''}${e.group ? `part ${e.part} of ${e.parts}` : ''}</div>` : ''}</div>
@@ -3577,7 +3601,7 @@ function renderBudget() {
   return `
     <div class="chips nowrap" id="daychips">${chips}</div>
     ${rateLine()}
-    <div class="card hero-b">
+    <div class="card hero-b ${level}">
       <div class="muted">${selDate === todayIso ? 'Left today' : 'Left for ' + dayLabel(selDate)}</div>
       <div class="bignum ${leftDay<0?'neg':''}">${brl(leftDay)}</div>
       <div class="muted">${cop(leftDay)}</div>
@@ -3585,6 +3609,7 @@ function renderBudget() {
       <div class="muted">Spent ${brl(spentDay)} of ${brl(availDay)}</div>
       <div class="muted copline">COP ${money(spentDay * state.rate)} of ${money(availDay * state.rate)}</div>
       ${state.carry && Math.abs(carryIn) >= 0.01 ? `<div class="carry ${carryIn < 0 ? 'neg' : ''}">${ic(carryIn < 0 ? 'warn' : 'cal')}<span>${carryIn > 0 ? `Includes ${brl(carryIn)} carried over from yesterday` : `${brl(-carryIn)} less: yesterday went over budget`} <span class="muted">(${cop(Math.abs(carryIn))})</span></span></div>` : ''}
+      ${dayMsg ? `<div class="daymsg ${level}" role="status">${ic('warn')}<span>${dayMsg}</span></div>` : ''}
       <div class="daybud">
         <label class="muted" for="dayBud">Budget for this day (R$)</label>
         <div class="row"><input id="dayBud" type="number" inputmode="decimal" min="0" value="${budDay}" data-act="setDayBudget" data-v="${selDate}">
@@ -3618,6 +3643,16 @@ function renderBudget() {
     </div>
     <div class="card"><div class="row"><b class="grow">Spent on ${dayLabel(selDate)}</b><span class="expamt"><b>${brl(spentDay)}</b><span class="muted">${cop(spentDay)}</span></span></div>
       ${log || `<div class="empty">${ic('receipt')}<span>Nothing logged for this day yet. Expenses you add appear here.</span></div>`}
+    </div>
+    <div class="card"><div class="row"><b class="grow">Day by day</b><span class="muted">tap a day to open it</span></div>
+      <div class="hist">${days.map(d => {
+        const sp = spentOn(d), av = dayAvailable(d), future = d > todayIso && sp === 0;
+        const st = av > 0 && sp > av || av <= 0 && sp > 0 ? 'over' : av > 0 && sp >= av * 0.8 ? 'near' : '';
+        return `<button class="hrow ${d === selDate ? 'sel' : ''} ${future ? 'future' : ''}" data-act="histDay" data-v="${d}" aria-label="${dayLabel(d)}: spent ${brl(sp)} of ${brl(av)}">
+          <span class="hday">${shortDay(d)}${d === todayIso ? '<span class="tag">Today</span>' : ''}</span>
+          ${bar(sp, av)}
+          <span class="hamt ${st}">${future ? '<span class="muted">' + brl(av) + '</span>' : `<b>${brl(sp)}</b><span class="muted"> / ${brl(av)}</span>`}</span></button>`;
+      }).join('')}</div>
     </div>
     <div class="card"><div class="row"><b class="grow">Where the money went</b></div>
       <div class="chips"><button class="chip ${ui.split !== 'trip' ? 'on' : ''}" data-act="setSplit" data-v="day">${dayLabel(selDate)}</button>
@@ -4272,6 +4307,7 @@ const actions = {
     return false;
   },
   budgetDay: t => { ui.expDate = t.dataset.v; },
+  histDay: t => { ui.expDate = t.dataset.v; setTimeout(() => window.scrollTo({top: 0, behavior: 'smooth'}), 0); },
   toggleCarry: () => { state.carry = !state.carry; },
   getRate: () => { if (!ui.rateBusy) fetchRate(); return false; },
   resetDayBudget: t => { if (state.dayBudgets) delete state.dayBudgets[t.dataset.v]; },
