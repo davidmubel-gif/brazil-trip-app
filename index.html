@@ -864,6 +864,15 @@
   .hero-b.near { border-color:var(--c-activities); }
   .hero-b.over { border-color:var(--warn); }
   .bignum.sm { font-size:30px; margin-top:var(--s1); }
+  .kvs { display:flex; flex-direction:column; margin-bottom:var(--s3); border:1px solid var(--line); border-radius:12px; padding:2px var(--s3); }
+  .kv { display:flex; justify-content:space-between; gap:var(--s3); padding:6px 0; border-top:1px solid var(--line); font-size:14px; }
+  .kv:first-child { border-top:0; }
+  .kv > span:last-child { text-align:right; font-weight:600; overflow-wrap:anywhere; }
+  .addinfo { display:flex; align-items:center; gap:var(--s2); width:100%; min-height:var(--tap); margin-bottom:var(--s3); padding:0 var(--s3); border:1px dashed var(--line); border-radius:12px; background:none; color:var(--accent); font:inherit; font-size:14px; font-weight:700; }
+  .addinfo .ri { margin:0; width:18px; height:18px; }
+  .docnotes { white-space:pre-wrap; font-size:14px; color:var(--muted); margin:-4px 0 var(--s3); }
+  .editform { display:flex; flex-direction:column; gap:var(--s2); margin-top:var(--s2); }
+  .editform textarea { margin-top:4px; }
   .lastbk { display:inline-block; padding:4px 10px; border-radius:8px; background:var(--ok-bg); color:var(--ok-ink); font-size:13px; font-weight:700; }
   .lastbk.stale { background:var(--warn-bg); color:var(--warn); }
   .hist { display:flex; flex-direction:column; margin-top:var(--s2); }
@@ -3039,11 +3048,11 @@ const DEFAULT_STATE = {
   plan: {},             // {'2026-11-14': [{id, actId, text, done, booked, status, docId}]}  status: idea | booked | cancelled
   expenses: [],         // [{id, date, amt, note}]
   docs: [
-    {id:'d1', title:'Passport', conf:'', notes:'', checks:[{t:'Valid 6+ months after trip',d:false},{t:'Photo of passport page saved offline',d:false}]},
-    {id:'d2', title:'Flights', conf:'', notes:'', checks:[{t:'Check-in opened',d:false},{t:'Return flight confirmed',d:false}]},
-    {id:'d3', title:'Airbnb São Paulo', conf:'', notes:'', checks:[{t:'Confirmed',d:true},{t:'Address saved offline',d:false},{t:'Check-in instructions saved',d:false}]},
-    {id:'d4', title:'Airbnb Rio', conf:'', notes:'', checks:[{t:'Booked',d:false},{t:'Address saved offline',d:false}]},
-    {id:'d5', title:'Buses (Tietê ↔ Rio)', conf:'', notes:'', checks:[{t:'Outbound ticket',d:false},{t:'Return ticket',d:false}]},
+    {id:'d1', type:'id', f:{}, title:'Passport', conf:'', notes:'', checks:[{t:'Valid 6+ months after trip',d:false},{t:'Photo of passport page saved offline',d:false}]},
+    {id:'d2', type:'flight', f:{}, title:'Flights', conf:'', notes:'', checks:[{t:'Check-in opened',d:false},{t:'Return flight confirmed',d:false}]},
+    {id:'d3', type:'stay', f:{}, title:'Airbnb São Paulo', conf:'', notes:'', checks:[{t:'Confirmed',d:true},{t:'Address saved offline',d:false},{t:'Check-in instructions saved',d:false}]},
+    {id:'d4', type:'stay', f:{}, title:'Airbnb Rio', conf:'', notes:'', checks:[{t:'Booked',d:false},{t:'Address saved offline',d:false}]},
+    {id:'d5', type:'bus', f:{}, title:'Buses (Tietê ↔ Rio)', conf:'', notes:'', checks:[{t:'Outbound ticket',d:false},{t:'Return ticket',d:false}]},
   ],
 };
 
@@ -3062,6 +3071,8 @@ function load() {
   // carry stars and plan items from the first version's ids over to the new place ids
   for (const [o, n] of Object.entries(OLD_IDS)) if (st.saved[o]) { st.saved[n] = true; delete st.saved[o]; }
   for (const d of Object.keys(st.plan)) st.plan[d].forEach(i => { if (OLD_IDS[i.actId]) i.actId = OLD_IDS[i.actId]; });
+  // document cards made before booking types: guess a type from the title, keep everything else
+  st.docs.forEach(d => { if (!d.type) d.type = guessDocType(d.title || ''); if (!d.f) d.f = {}; if (!d.checks) d.checks = []; });
   return st;
 }
 function save() { try { localStorage.setItem('trip-state-v1', JSON.stringify(state)); } catch (e) {} }
@@ -3201,6 +3212,7 @@ const IC = {
   receipt:'<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
   copy:'<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 00-1-1H5a1 1 0 00-1 1v10a1 1 0 001 1h3"/>',
   cal:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+  shield:'<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
   fork:'<path d="M7 3v8a2 2 0 002 2v8M5 3v5a2 2 0 004 0V3M17 21V3c-2 1-3 4-3 7s1 3 3 3"/>',
   ticket:'<path d="M3 8a2 2 0 002-2h14a2 2 0 002 2v2a2 2 0 000 4v2a2 2 0 00-2 2H5a2 2 0 00-2-2v-2a2 2 0 000-4z"/><path d="M14 7v2M14 11v2M14 15v2"/>',
   bag:'<path d="M5 8h14l-1 13H6z"/><path d="M9 8V6a3 3 0 016 0v2"/>',
@@ -4201,6 +4213,73 @@ function renderPlan() {
     </div>`;
 }
 
+/* ---- Docs: each card is a typed booking with its own fields ---- */
+// fields: [key, label, input type]; "code" is the label for the card's confirmation number (null: no code for this type)
+const DOC_TYPES = {
+  flight: {label: 'Flight', icon: 'plane', code: 'Booking code', fields: [['airline', 'Airline'], ['flightNo', 'Flight number'], ['from', 'From (airport)'], ['to', 'To (airport)'],
+    ['date', 'Date', 'date'], ['dep', 'Departs', 'time'], ['arr', 'Arrives', 'time'], ['terminal', 'Terminal'], ['seat', 'Seat']]},
+  stay: {label: 'Stay', icon: 'home', code: 'Confirmation number', fields: [['address', 'Address'], ['checkIn', 'Check-in date', 'date'], ['checkInTime', 'Check-in from', 'time'],
+    ['checkOut', 'Check-out date', 'date'], ['checkOutTime', 'Check-out by', 'time'], ['host', 'Host or hotel'], ['phone', 'Phone', 'tel'], ['doorCode', 'Door or key code'], ['wifi', 'Wi-Fi']]},
+  bus: {label: 'Bus or train', icon: 'bus', code: 'Booking code', fields: [['company', 'Company'], ['from', 'From (station)'], ['to', 'To (station)'],
+    ['date', 'Date', 'date'], ['dep', 'Departs', 'time'], ['arr', 'Arrives', 'time'], ['platform', 'Platform or gate'], ['seat', 'Seat']]},
+  event: {label: 'Event or ticket', icon: 'ticket', code: 'Ticket or order number', fields: [['venue', 'Venue'], ['address', 'Address'], ['date', 'Date', 'date'], ['time', 'Starts', 'time'], ['seat', 'Seat or section']]},
+  tour: {label: 'Tour', icon: 'walk', code: 'Booking code', fields: [['company', 'Company or guide'], ['meeting', 'Meeting point'], ['date', 'Date', 'date'], ['time', 'Starts', 'time'], ['phone', 'Phone', 'tel']]},
+  insurance: {label: 'Insurance', icon: 'shield', code: 'Policy number', fields: [['provider', 'Provider'], ['hotline', 'Emergency hotline', 'tel'], ['from', 'Cover from', 'date'], ['until', 'Cover until', 'date']]},
+  id: {label: 'Passport or ID', icon: 'idcard', code: null, fields: [['name', 'Name on document'], ['number', 'Document number'], ['country', 'Issued by'], ['expiry', 'Expires', 'date']]},
+  other: {label: 'Other', icon: 'note', code: 'Reference', fields: [['date', 'Date', 'date'], ['time', 'Time', 'time'], ['address', 'Address']]}
+};
+const docType = d => DOC_TYPES[d.type] || DOC_TYPES.other;
+// a sensible type for cards made before types existed, from their title
+// (a function declaration, because load() needs it before this part of the file has run)
+function guessDocType(t) {
+  return /flight|voo|plane|avi[aã]o/i.test(t) ? 'flight' : /airbnb|hotel|hostel|stay|apartment|pousada/i.test(t) ? 'stay'
+    : /bus|[ôo]nibus|train|trem/i.test(t) ? 'bus' : /passport|passaporte|\bid\b|visa|c[ée]dula/i.test(t) ? 'id'
+    : /insurance|seguro/i.test(t) ? 'insurance' : /tour|guide/i.test(t) ? 'tour' : /ticket|show|concert|match|ingresso/i.test(t) ? 'event' : 'other';
+}
+// dates in the trip year read "Nov 14"; any other year shows it ("May 1, 2031"), which matters for expiry dates
+const fDate = v => !v ? '' : v.slice(0, 4) === tripDays()[0].slice(0, 4) ? shortDate(v)
+  : new Date(v + 'T12:00:00').toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'});
+// the one-line summary under a booking's title, e.g. "LA 3456 · GRU → GIG · Nov 14, 07:35"
+function docSummary(d) {
+  const f = d.f || {}, j = (...p) => p.filter(Boolean).join(' · ');
+  switch (d.type) {
+    case 'flight': case 'bus': return j(f.flightNo || f.company || f.airline, f.from && f.to ? `${f.from} → ${f.to}` : f.from || f.to, j(fDate(f.date), f.dep));
+    case 'stay': return j(f.checkIn && f.checkOut ? `${fDate(f.checkIn)} to ${fDate(f.checkOut)}` : fDate(f.checkIn), f.address);
+    case 'event': case 'tour': return j(f.venue || f.company, j(fDate(f.date), f.time));
+    case 'insurance': return j(f.provider, f.until ? 'until ' + fDate(f.until) : '');
+    case 'id': return j(f.country, f.expiry ? 'expires ' + fDate(f.expiry) : '');
+    default: return j(fDate(f.date), f.time, f.address);
+  }
+}
+// filled-in fields as label/value rows
+const docFields = d => docType(d).fields.filter(([k]) => d.f && d.f[k]).map(([k, l, ty]) =>
+  `<div class="kv"><span class="muted">${l}</span><span>${ty === 'date' ? fDate(d.f[k]) : esc(d.f[k])}</span></div>`).join('');
+// Bottom sheet to edit every field of a booking (works on a draft; nothing changes until Save)
+function renderDocEdit() {
+  const e = ui.docEdit; if (!e) return '';
+  const dr = e.draft, T = DOC_TYPES[dr.type] || DOC_TYPES.other;
+  const inp = (k, l, ty) => `<label class="muted">${l}<input ${ty ? `type="${ty === 'tel' ? 'tel' : ty}"` : ''} value="${esc((dr.f || {})[k] || '')}" data-act="docField" data-k="${k}"></label>`;
+  return `<div class="backdrop" data-act="closeDocEdit"></div>
+    <div class="sheet" role="dialog" aria-label="Edit ${esc(dr.title || 'booking')}"><div class="grab" aria-hidden="true"></div>
+      <div class="row"><b class="grow" style="font-size:18px">${e.isNew ? 'New booking' : 'Edit booking'}</b><button class="x" data-act="closeDocEdit" aria-label="Close">×</button></div>
+      <div class="editform">
+        <label class="muted">Name<input value="${esc(dr.title)}" data-act="docField" data-k="title" placeholder="LATAM to São Paulo"></label>
+        <label class="muted">Type<select data-act="docType">${Object.entries(DOC_TYPES).map(([k, t]) => `<option value="${k}" ${k === dr.type ? 'selected' : ''}>${t.label}</option>`).join('')}</select></label>
+        <div class="grid2">${T.fields.map(([k, l, ty]) => inp(k, l, ty)).join('')}</div>
+        ${T.code ? `<label class="muted">${T.code}<input value="${esc(dr.conf || '')}" data-act="docField" data-k="conf" autocomplete="off" spellcheck="false"></label>` : ''}
+        <label class="muted">Notes<textarea rows="3" data-act="docField" data-k="notes">${esc(dr.notes || '')}</textarea></label>
+      </div>
+      <div class="row" style="margin-top:var(--s3)">
+        ${e.isNew ? '' : `<button class="ghost" data-act="delDoc" data-id="${e.id}">Delete</button>`}
+        <button class="btn grow" data-act="saveDocEdit">Save</button></div>
+    </div>`;
+}
+// typing in the edit sheet updates the draft straight away (so Save right after typing keeps everything)
+function docFieldInput(t) {
+  if (!ui.docEdit) return;
+  const dr = ui.docEdit.draft, k = t.dataset.k;
+  if (k === 'title' || k === 'conf' || k === 'notes') dr[k] = t.value; else (dr.f ||= {})[k] = t.value.trim();
+}
 // Docs, bottom: back up / restore all app data
 function renderBackupCard() {
   const last = state.lastBackup, age = last ? Math.round((new Date(brazilToday()) - new Date(last)) / 864e5) : null;
@@ -4222,21 +4301,20 @@ function renderBackupCard() {
 function renderDocs() {
   const usedIn = d => { const u = docUses(d.id); return u.length ? `<div class="ilabel" style="margin-top:var(--s2)">Used in your plan</div>
       <div class="chips">${u.map(x => `<button class="chip" data-act="goPlanDay" data-v="${x.date}">${dayLabel(x.date)} · ${esc(itemName(x.it))}</button>`).join('')}</div>` : ''; };
-  // an icon that fits the document's title
-  const docIcon = t => /flight|voo|plane|avi[aã]o/i.test(t) ? 'plane' : /airbnb|hotel|hostel|stay|apartment/i.test(t) ? 'home'
-    : /bus|[ôo]nibus|train|ticket/i.test(t) ? 'bus' : /passport|passaporte|\bid\b|visa/i.test(t) ? 'idcard' : 'note';
   const cards = state.docs.map(d => {
-    const done = d.checks.filter(c => c.d).length;
+    const done = d.checks.filter(c => c.d).length, T = docType(d), sum = docSummary(d);
     return `<div class="card doc">
-      <div class="doc-h"><span class="doc-ic">${ic(docIcon(d.title))}</span>
-        <div class="grow"><b>${esc(d.title)}</b>${d.notes ? `<div class="muted">${esc(d.notes)}</div>` : ''}</div>
+      <div class="doc-h"><span class="doc-ic">${ic(T.icon)}</span>
+        <div class="grow"><b>${esc(d.title)}</b><div class="muted">${T.label}${sum ? ' · ' + esc(sum) : ''}</div></div>
         ${d.conf ? '<span class="tag okTag">Booked</span>' : ''}
-        <button class="x" data-act="delDoc" data-id="${d.id}" aria-label="Delete ${esc(d.title)}">×</button></div>
-      <label class="ilabel" for="conf-${d.id}">Confirmation number</label>
+        <button class="ghost" data-act="editDoc" data-id="${d.id}" aria-label="Edit ${esc(d.title)}">Edit</button></div>
+      ${docFields(d) ? `<div class="kvs">${docFields(d)}</div>` : `<button class="addinfo" data-act="editDoc" data-id="${d.id}">${ic('note')}Add the ${T.label.toLowerCase()} details</button>`}
+      ${d.notes ? `<div class="docnotes">${esc(d.notes)}</div>` : ''}
+      ${T.code ? `<label class="ilabel" for="conf-${d.id}">${T.code}</label>
       <div class="copyfield">
         <input id="conf-${d.id}" placeholder="Add it here" value="${esc(d.conf)}" data-act="setConf" data-id="${d.id}" autocomplete="off" spellcheck="false">
-        <button data-act="copy" data-id="${d.id}" aria-label="Copy confirmation number for ${esc(d.title)}">${ic('copy')}<span>Copy</span></button>
-      </div>
+        <button data-act="copy" data-id="${d.id}" aria-label="Copy ${T.code.toLowerCase()} for ${esc(d.title)}">${ic('copy')}<span>Copy</span></button>
+      </div>` : ''}
       ${usedIn(d)}
       <div class="row" style="margin-top:var(--s3)"><b class="grow" style="font-size:14px">Checklist</b>${d.checks.length ? `<span class="muted">${done} of ${d.checks.length} done</span>` : ''}</div>
       <div class="checks">${d.checks.map((c,i) => `<label class="check ${c.d?'done':''}"><input type="checkbox" ${c.d?'checked':''} data-act="toggleCheck" data-id="${d.id}" data-i="${i}"><span class="t">${esc(c.t)}</span></label>`).join('')
@@ -4246,9 +4324,12 @@ function renderDocs() {
   }).join('');
   const empty = `<div class="card empty big-empty">${ic('note')}<div><b>No documents yet</b>
     <div class="muted">Add your flights, stays and bus tickets so their confirmation numbers are one tap away, even offline.</div></div></div>`;
-  return (cards || empty) + `<div class="card"><label class="muted" for="newDoc">New document</label>
-      <input id="newDoc" placeholder="e.g. Travel insurance">
-      <button class="btn act wide" data-act="addDoc">Add document</button></div>
+  return (cards || empty) + `<div class="card"><b>Add a booking or document</b>
+      <div class="grid2" style="margin-top:var(--s2)">
+        <label class="muted">Name<input id="newDoc" placeholder="Travel insurance"></label>
+        <label class="muted">Type<select id="newDocType">${Object.entries(DOC_TYPES).map(([k, t]) => `<option value="${k}">${t.label}</option>`).join('')}</select></label>
+      </div>
+      <button class="btn act wide" data-act="addDoc">Add and fill in details</button></div>
     <p class="muted">Everything here is stored only on this phone. Confirmation codes are fine; skip passport numbers if you'd rather not keep them here.</p>
     ${renderBackupCard()}`;
 }
@@ -4257,7 +4338,7 @@ function render() {
   if (tab !== 'explore') { ui.sheet = false; ui.draft = null; }
   if (!(tab === 'explore' && ui.detail)) ui.daySheet = false;
   const fn = {explore:renderExplore, budget:renderBudget, plan:renderPlan, docs:renderDocs}[tab];
-  document.getElementById('main').innerHTML = fn() + (tab === 'plan' ? renderDocSheet() + renderTimeSheet() : '') + (tab === 'budget' ? renderToast() : '');
+  document.getElementById('main').innerHTML = fn() + (tab === 'plan' ? renderDocSheet() + renderTimeSheet() : '') + (tab === 'budget' ? renderToast() : '') + (tab === 'docs' ? renderDocEdit() : '');
   if (tab === 'budget') expPreview();
   if (tab === 'explore' && ui.detail) refreshPhotos();
   // centre the chosen day chip by scrolling the chip row sideways only (scrollIntoView also scrolled the page up)
@@ -4444,8 +4525,22 @@ const actions = {
   delPlan: t => { state.plan[ui.planDay] = (state.plan[ui.planDay]||[]).filter(i => i.id !== t.dataset.id); },
   toggleCheck: t => { const d = state.docs.find(x => x.id === t.dataset.id); d.checks[t.dataset.i].d = !d.checks[t.dataset.i].d; },
   addCheck: t => { const v = document.getElementById('chk-'+t.dataset.id).value.trim(); if (!v) return false; state.docs.find(x => x.id === t.dataset.id).checks.push({t:v, d:false}); },
-  addDoc: () => { const v = document.getElementById('newDoc').value.trim(); if (!v) return false; state.docs.push({id:uid(), title:v, conf:'', notes:'', checks:[]}); },
-  delDoc: t => { if (confirm('Delete this document card?')) state.docs = state.docs.filter(d => d.id !== t.dataset.id); else return false; },
+  // a new booking opens straight in the edit sheet; it's only added when you press Save
+  addDoc: () => {
+    const type = document.getElementById('newDocType').value, title = document.getElementById('newDoc').value.trim() || DOC_TYPES[type].label;
+    ui.docEdit = {isNew: true, draft: {id: uid(), type, title, f: {}, conf: '', notes: '', checks: []}};
+  },
+  editDoc: t => { const d = state.docs.find(x => x.id === t.dataset.id); if (d) ui.docEdit = {id: d.id, draft: structuredClone(d)}; },
+  closeDocEdit: () => { ui.docEdit = null; },
+  saveDocEdit: () => {
+    const e = ui.docEdit; if (!e) return false;
+    const dr = e.draft; dr.title = (dr.title || '').trim() || docType(dr).label;
+    // keep only fields that belong to the chosen type
+    const keys = new Set(docType(dr).fields.map(f => f[0])); dr.f = Object.fromEntries(Object.entries(dr.f || {}).filter(([k, v]) => keys.has(k) && String(v).trim()));
+    if (e.isNew) state.docs.push(dr); else state.docs = state.docs.map(d => d.id === e.id ? dr : d);
+    ui.docEdit = null;
+  },
+  delDoc: t => { if (confirm('Delete this document card?')) { state.docs = state.docs.filter(d => d.id !== t.dataset.id); ui.docEdit = null; } else return false; },
   copy: t => {
     const d = state.docs.find(x => x.id === t.dataset.id); if (!d) return false;
     const box = document.getElementById('conf-' + d.id); if (box) d.conf = box.value.trim();   // just typed, not saved yet
@@ -4464,9 +4559,12 @@ document.getElementById('main').addEventListener('click', e => {
   save(); render();
 });
 // Text boxes and dropdowns save when you finish typing / choose (without redrawing, so the keyboard stays open)
+document.getElementById('main').addEventListener('input', e => { if (e.target.dataset.act === 'docField') docFieldInput(e.target); });
 document.getElementById('main').addEventListener('change', e => {
   const t = e.target, a = t.dataset.act;
-  if (a === 'setConf') { state.docs.find(d => d.id === t.dataset.id).conf = t.value.trim(); save(); }
+  if (a === 'docField') docFieldInput(t);
+  else if (a === 'docType' && ui.docEdit) { ui.docEdit.draft.type = t.value; render(); }   // fields already typed are kept in the draft
+  else if (a === 'setConf') { state.docs.find(d => d.id === t.dataset.id).conf = t.value.trim(); save(); }
   else if (a === 'setDaily') { state.daily = parseFloat(t.value) || 0; save(); render(); }
   else if (a === 'setRate') { const v = parseFloat(t.value); if (v > 0) { state.rate = v; state.rateInfo = {source: 'manual', date: brazilToday()}; ui.rateMsg = ''; } save(); render(); }
   else if (a === 'setCardFee') { const v = parseFloat(t.value); state.cardFee = v > 0 ? Math.min(20, v) : 0; save(); render(); }
