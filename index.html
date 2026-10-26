@@ -21,7 +21,7 @@
     --accent:#1B6D3F; --on-accent:#FFFFFF; --action:#002776; --on-action:#FFFFFF;
     --hi:#FFCC29; --on-hi:#142218;
     /* spending categories (only used for small dots, bars and icons; text stays ink) */
-    --c-food:#1B6D3F; --c-transport:#002776; --c-activities:#C99700; --c-shopping:#B85B40; --c-nightlife:#6B3A7D; --c-other:#7C887E;
+    --c-food:#1B6D3F; --c-transport:#002776; --c-stay:#1F6F8B; --c-activities:#C99700; --c-shopping:#B85B40; --c-nightlife:#6B3A7D; --c-other:#7C887E;
     --ok-bg:#E2F0E5; --ok-ink:#1B6D3F; --warn:#92400E; --warn-bg:#FEF3C7; --star:#A67C00;
     --nav-h:calc(64px + env(safe-area-inset-bottom)); --radius:16px; --radius-sm:10px; --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --tap:44px;
   }
@@ -30,7 +30,7 @@
       --bg:#0F1712; --card:#18221B; --ink:#E9F0E8; --muted:#A7B5A8; --line:#2B382E; --soft:#223026;
       --accent:#5CC98A; --on-accent:#06210F; --action:#7FA2F5; --on-action:#071433;
       --hi:#F2C230; --on-hi:#142218;
-      --c-food:#5CC98A; --c-transport:#7FA2F5; --c-activities:#F2C230; --c-shopping:#E08A6D; --c-nightlife:#C49AD6; --c-other:#8E9B90;
+      --c-food:#5CC98A; --c-transport:#7FA2F5; --c-stay:#7CC6DE; --c-activities:#F2C230; --c-shopping:#E08A6D; --c-nightlife:#C49AD6; --c-other:#8E9B90;
       --ok-bg:#183A26; --ok-ink:#7FDCA3; --warn:#FBBF24; --warn-bg:#33270B; --star:#F2C230;
     }
   }
@@ -885,8 +885,14 @@
   .toast { position:fixed; z-index:45; left:var(--s4); right:var(--s4); bottom:calc(var(--nav-h) + var(--s3)); max-width:608px; margin:0 auto; display:flex; align-items:center; gap:var(--s3);
     background:var(--ink); color:var(--bg); border-radius:14px; padding:var(--s2) var(--s2) var(--s2) var(--s4); box-shadow:0 4px 16px rgba(0,0,0,.25); font-size:14px; font-weight:600; }
   .toast .ghost { color:var(--bg); border-color:transparent; font-weight:800; text-decoration:underline; }
-  .catgrid { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:4px; }
-  .catgrid button { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; min-height:64px; border:1px solid var(--line); border-radius:12px; background:var(--card); color:var(--ink); font:inherit; font-size:13px; font-weight:600; padding:var(--s2) 4px; }
+  .spread { display:flex; align-items:center; gap:var(--s2); margin-top:var(--s3); font-size:14px; }
+  .spread button { width:var(--tap); height:var(--tap); border:1px solid var(--line); border-radius:12px; background:var(--bg); color:var(--ink); font:inherit; font-size:22px; font-weight:700; }
+  .spread b { min-width:64px; text-align:center; }
+  #spreadHint { min-height:18px; margin-top:2px; }
+  .preform { display:flex; flex-direction:column; gap:var(--s2); margin-top:var(--s3); padding-top:var(--s3); border-top:1px solid var(--line); }
+  .preform .ghost { align-self:flex-start; }
+  .catgrid { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-top:4px; }
+  .catgrid button { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; min-height:64px; border:1px solid var(--line); border-radius:12px; background:var(--card); color:var(--ink); font:inherit; font-size:12px; font-weight:600; padding:var(--s2) 4px; }
   .catgrid button .ri { margin:0; width:24px; height:24px; }
   .catgrid button.on { border:2px solid var(--accent); background:var(--ok-bg); font-weight:800; }
   .stack { display:flex; height:14px; border-radius:999px; overflow:hidden; background:var(--soft); margin:var(--s1) 0 var(--s2); gap:2px; }
@@ -3420,9 +3426,9 @@ const brazilToday = () => new Date(Date.now() - 3*3600*1000).toISOString().slice
 const cop = v => '≈ COP ' + money(v * state.rate);
 const copAmt = v => 'COP ' + money(v);
 // Spending categories: [id, label, icon]; expenses logged before categories existed count as "other"
-const CATS = [['food', 'Food', 'fork'], ['transport', 'Transport', 'train'], ['activities', 'Activities', 'ticket'],
+const CATS = [['food', 'Food', 'fork'], ['transport', 'Transport', 'train'], ['stay', 'Stay', 'home'], ['activities', 'Activities', 'ticket'],
   ['shopping', 'Shopping', 'bag'], ['nightlife', 'Nightlife', 'music'], ['other', 'Other', 'dots']];
-const catOf = e => CATS.find(c => c[0] === e.cat) || CATS[5];
+const catOf = e => CATS.find(c => c[0] === e.cat) || CATS[CATS.length - 1];
 const catIc = c => `<svg class="ri" viewBox="0 0 24 24" aria-hidden="true" style="stroke:var(--c-${c[0]})">${IC[c[2]]}</svg>`;
 // "Where the money went": a stacked bar plus one row per category, biggest first
 function breakdown(list) {
@@ -3487,17 +3493,30 @@ function kpPress(k) {
   if (s.replace(/\D/g, '').length > 10) return;
   ui.kp = s;
 }
-// "≈ R$ 12,00" / "≈ COP 9.000" under the amount while typing
+// Spreading one cost (e.g. a hotel) over several days, starting on the day picked in the form
+const spreadText = () => { const n = ui.spread || 1; return n + ' day' + (n === 1 ? '' : 's'); };
+function spreadDays() {   // the days the cost lands on, never past the end of the trip
+  const days = tripDays(), sel = document.getElementById('expDate'), from = days.indexOf(sel ? sel.value : days[0]);
+  return days.slice(Math.max(0, from), Math.max(0, from) + (ui.spread || 1));
+}
+function splitAmount(v, n, cents) {   // equal parts that add back up exactly; the last part takes the rounding
+  const unit = cents ? 100 : 1, each = Math.floor(v * unit / n) / unit;
+  return Array.from({length: n}, (_, i) => i < n - 1 ? each : Math.round((v - each * (n - 1)) * unit) / unit);
+}
+// "≈ R$ 12,00" / "≈ COP 9.000" under the amount while typing, plus the spread hint
 function expPreview() {
   const amt = document.getElementById('kpAmt'), out = document.getElementById('expConv'); if (!amt || !out) return;
   amt.textContent = kpText();
-  const v = kpVal();
-  out.textContent = v > 0 ? (state.lastCur === 'COP' ? '≈ ' + brl(state.rate > 0 ? v / state.rate : 0) : cop(v)) : '';
+  const v = kpVal(), isCOP = state.lastCur === 'COP';
+  out.textContent = v > 0 ? (isCOP ? '≈ ' + brl(state.rate > 0 ? v / state.rate : 0) : cop(v)) : '';
+  const hint = document.getElementById('spreadHint'), sd = spreadDays();
+  if (hint) hint.textContent = sd.length > 1 && v > 0
+    ? `${isCOP ? copAmt(splitAmount(v, sd.length, false)[0]) : brl(splitAmount(v, sd.length, true)[0])} a day, ${dayLabel(sd[0])} to ${dayLabel(sd[sd.length - 1])}` : '';
 }
 // Up to 5 recent, different expenses for the "Again" chips (same note, amount, currency and category count once)
 function recentExpenses() {
   const seen = new Set(), out = [];
-  for (const e of state.expenses.slice().reverse()) {
+  for (const e of state.expenses.slice().reverse().filter(e => !e.prepaid && !e.group)) {
     const k = [e.note, e.cur, e.cur === 'COP' ? e.cop : e.amt, e.cat].join('|');
     if (!seen.has(k)) { seen.add(k); out.push(e); }
     if (out.length === 5) break;
@@ -3524,7 +3543,10 @@ function renderBudget() {
   // the days still ahead, today included (all of them before the trip, none after it)
   const ahead = todayIso < days[0] ? days : days.filter(d => d >= todayIso);
   const perDay = ahead.length ? totalLeft / ahead.length : null;
-  const mismatch = Math.abs(sumDays - trip) >= 1;
+  // prepaid costs (no date) count toward the trip, not toward any day
+  const prepaid = state.expenses.filter(e => e.prepaid), prepaidSum = prepaid.reduce((s, e) => s + expBRL(e), 0);
+  const planned = sumDays + prepaidSum;
+  const mismatch = Math.abs(planned - trip) >= 1;
   const shortDay = d => new Date(d + 'T12:00:00').toLocaleDateString('en-US', {weekday:'short', day:'numeric'});
   const chips = days.map(d => `<button class="chip ${d === selDate ? 'on' : ''}" data-act="budgetDay" data-v="${d}">${shortDay(d)}${state.expenses.some(e => e.date === d) ? '<span class="dot"></span>' : ''}</button>`).join('');
   const dayOpts = days.map(d => `<option value="${d}" ${d===selDate?'selected':''}>${dayLabel(d)}</option>`).join('');
@@ -3533,7 +3555,7 @@ function renderBudget() {
     return `<div class="bar ${spent > of ? 'over' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(p)}"><i style="width:${p}%"></i></div>`; };
   const log = state.expenses.filter(e => e.date === selDate).map(e => `
     <div class="exp">${catIc(catOf(e))}
-      <div class="grow">${esc(e.note || catOf(e)[1])}${e.note ? `<div class="muted">${catOf(e)[1]}</div>` : ''}</div>
+      <div class="grow">${esc(e.note || catOf(e)[1])}${e.note || e.group ? `<div class="muted">${e.note ? catOf(e)[1] : ''}${e.note && e.group ? ' · ' : ''}${e.group ? `part ${e.part} of ${e.parts}` : ''}</div>` : ''}</div>
       <div class="expamt"><b>${e.cur === 'COP' ? copAmt(e.cop) : brl(e.amt)}</b>
         <div class="muted">${e.cur === 'COP' ? '≈ ' + brl(expBRL(e)) : cop(e.amt)}</div></div>
       <button class="x" data-act="delExp" data-id="${e.id}" aria-label="Delete expense ${esc(e.note || (e.cur === 'COP' ? copAmt(e.cop) : brl(e.amt)))}">×</button></div>`).join('');
@@ -3572,6 +3594,11 @@ function renderBudget() {
         <label class="muted">Day<select id="expDate" data-act="expDate">${dayOpts}</select></label>
         <label class="muted">What for?<input id="expNote" placeholder="Optional"></label>
       </div>
+      <div class="spread"><span class="grow">Spread over</span>
+        <button data-act="spread" data-v="-1" aria-label="One day fewer">−</button>
+        <b id="spreadN">${spreadText()}</b>
+        <button data-act="spread" data-v="1" aria-label="One day more">+</button></div>
+      <div class="muted" id="spreadHint"></div>
       <button class="btn act wide" data-act="addExp">Add expense</button>
     </div>
     <div class="card"><div class="row"><b class="grow">Spent on ${dayLabel(selDate)}</b><span class="expamt"><b>${brl(spentDay)}</b><span class="muted">${cop(spentDay)}</span></span></div>
@@ -3589,12 +3616,29 @@ function renderBudget() {
       ${bar(totalSpent, trip)}
       <div class="muted">Spent ${brl(totalSpent)} of ${brl(trip)}</div>
       <div class="muted copline">COP ${money(totalSpent * state.rate)} of ${money(trip * state.rate)}</div>
+      ${prepaidSum ? `<div class="muted copline">Prepaid ${brl(prepaidSum)} · day to day ${brl(totalSpent - prepaidSum)}</div>` : ''}
       <div class="${totalLeft<0?'neg':''}" style="margin-top:var(--s1)"><b>Left: ${brl(totalLeft)}</b> <span class="muted">${cop(totalLeft)}</span></div>
       ${perDay !== null ? `<div class="perday ${perDay < 0 ? 'neg' : ''}">${ic('cal')}<div><b>About ${brl(perDay)} a day</b> for the ${ahead.length} day${ahead.length === 1 ? '' : 's'} left${ahead.length < days.length ? ', today included' : ''}
         <div class="muted">${cop(perDay)} a day</div></div></div>` : '<div class="muted" style="margin-top:var(--s2)">The trip is over.</div>'}
-      ${mismatch && sumDays > trip ? `<div class="ag-warn" style="margin-top:var(--s3)">${ic('warn')}<span>Your day budgets add up to ${brl(sumDays)}, ${brl(sumDays - trip)} more than the trip budget.</span></div>` : ''}
-      ${mismatch && sumDays < trip ? `<div class="muted" style="margin-top:var(--s3)">${brl(trip - sumDays)} of the trip budget isn't given to any day yet (your day budgets add up to ${brl(sumDays)}).</div>` : ''}
-      ${mismatch ? `<button class="ghost" style="margin-top:var(--s2)" data-act="matchTrip">Set trip budget to ${brl(sumDays)}</button>` : ''}
+      ${mismatch && planned > trip ? `<div class="ag-warn" style="margin-top:var(--s3)">${ic('warn')}<span>Your day budgets${prepaidSum ? ' plus prepaid costs' : ''} add up to ${brl(planned)}, ${brl(planned - trip)} more than the trip budget.</span></div>` : ''}
+      ${mismatch && planned < trip ? `<div class="muted" style="margin-top:var(--s3)">${brl(trip - planned)} of the trip budget isn't given to any day yet (your day budgets${prepaidSum ? ' plus prepaid costs' : ''} add up to ${brl(planned)}).</div>` : ''}
+      ${mismatch ? `<button class="ghost" style="margin-top:var(--s2)" data-act="matchTrip">Set trip budget to ${brl(planned)}</button>` : ''}
+    </div>
+    <div class="card"><div class="row"><b class="grow">Prepaid before the trip</b>${prepaidSum ? `<span class="expamt"><b>${brl(prepaidSum)}</b><span class="muted">${cop(prepaidSum)}</span></span>` : ''}</div>
+      <div class="muted" style="margin-top:2px">Flights, stays and bus tickets you've already paid. They count toward the trip budget, not toward any day.</div>
+      ${prepaid.map(e => `<div class="exp">${catIc(catOf(e))}
+        <div class="grow">${esc(e.note || catOf(e)[1])}<div class="muted">${catOf(e)[1]}</div></div>
+        <div class="expamt"><b>${e.cur === 'COP' ? copAmt(e.cop) : brl(e.amt)}</b><div class="muted">${e.cur === 'COP' ? '≈ ' + brl(expBRL(e)) : cop(e.amt)}</div></div>
+        <button class="x" data-act="delExp" data-id="${e.id}" aria-label="Delete prepaid ${esc(e.note || catOf(e)[1])}">×</button></div>`).join('')}
+      <div class="preform">
+        <label class="muted">What<input id="preNote" placeholder="Flight to São Paulo"></label>
+        <div class="grid2">
+          <label class="muted">Amount<input id="preAmt" type="number" inputmode="decimal" min="0" placeholder="0"></label>
+          <label class="muted">Currency<select id="preCur"><option value="BRL">R$ reais</option><option value="COP" ${state.lastCur === 'COP' ? 'selected' : ''}>COP pesos</option></select></label>
+        </div>
+        <label class="muted">Category<select id="preCat">${CATS.map(c => `<option value="${c[0]}" ${c[0] === 'stay' ? 'selected' : ''}>${c[1]}</option>`).join('')}</select></label>
+        <button class="ghost" data-act="addPrepaid">Add prepaid cost</button>
+      </div>
     </div>
     <details class="card dt settings"><summary><b>Settings</b><span class="muted">${brl(trip)} trip · ${brl(state.daily)} a day · ${money(state.rate)} COP per R$</span>${ic('chev', 'ri chev')}</summary>
       <label class="muted" style="display:block">Trip budget (R$)<input id="setTrip" type="number" inputmode="decimal" min="0" value="${trip}" data-act="setTrip"></label>
@@ -4156,11 +4200,24 @@ const actions = {
   addExp: () => {
     const v = kpVal();
     if (!(v > 0)) { const s = document.getElementById('expConv'); if (s) s.textContent = 'Type an amount first'; return false; }
-    const e = {id:uid(), date:document.getElementById('expDate').value, note:document.getElementById('expNote').value.trim()};
-    if (state.lastCur === 'COP') Object.assign(e, {cur:'COP', cop:v}); else e.amt = v;
-    e.cat = ui.expCat || 'other'; ui.expCat = null; ui.kp = '';
-    state.expenses.push(e);
-    showToast(`Added ${e.note || catOf(e)[1]} · ${e.cur === 'COP' ? copAmt(e.cop) : brl(e.amt)}`, e.id);
+    const isCOP = state.lastCur === 'COP', note = document.getElementById('expNote').value.trim(), cat = ui.expCat || 'other';
+    const sd = spreadDays(), parts = splitAmount(v, sd.length, !isCOP), group = sd.length > 1 ? uid() : undefined;
+    const added = sd.map((date, i) => {
+      const e = {id: uid(), date, note, cat};
+      if (isCOP) Object.assign(e, {cur: 'COP', cop: parts[i]}); else e.amt = parts[i];
+      if (group) Object.assign(e, {group, part: i + 1, parts: sd.length});
+      return e;
+    });
+    state.expenses.push(...added);
+    ui.expCat = null; ui.kp = ''; ui.spread = 1;
+    const label = `${note || catOf(added[0])[1]} · ${isCOP ? copAmt(v) : brl(v)}`;
+    showToast(group ? `Added ${label} over ${sd.length} days` : `Added ${label}`, group ? 'group:' + group : added[0].id);
+  },
+  spread: t => {
+    const days = tripDays(), left = days.length - Math.max(0, days.indexOf(document.getElementById('expDate').value));
+    ui.spread = Math.max(1, Math.min(left, (ui.spread || 1) + Number(t.dataset.v)));
+    document.getElementById('spreadN').textContent = spreadText(); expPreview();
+    return false;
   },
   // one tap: the same expense again, on the day chosen in the form
   repeatExp: t => {
@@ -4169,7 +4226,14 @@ const actions = {
     state.expenses.push(e);
     showToast(`Added ${e.note || catOf(e)[1]} · ${e.cur === 'COP' ? copAmt(e.cop) : brl(e.amt)} on ${dayLabel(e.date)}`, e.id);
   },
-  undoExp: t => { state.expenses = state.expenses.filter(e => e.id !== t.dataset.id); ui.toast = null; },
+  addPrepaid: () => {
+    const v = parseFloat(document.getElementById('preAmt').value); if (!(v > 0)) return false;
+    const e = {id: uid(), prepaid: true, note: document.getElementById('preNote').value.trim(), cat: document.getElementById('preCat').value};
+    if (document.getElementById('preCur').value === 'COP') Object.assign(e, {cur: 'COP', cop: v}); else e.amt = v;
+    state.expenses.push(e);
+  },
+  undoExp: t => { const id = t.dataset.id;   // one expense, or "group:<id>" for all parts of a spread cost
+    state.expenses = state.expenses.filter(e => id.startsWith('group:') ? e.group !== id.slice(6) : e.id !== id); ui.toast = null; },
   // keypad presses update the amount in place (no redraw)
   kp: t => { kpPress(t.dataset.v); expPreview(); return false; },
   // pick a category in place (no redraw, so a half-typed amount stays)
@@ -4193,7 +4257,7 @@ const actions = {
   budgetDay: t => { ui.expDate = t.dataset.v; },
   getRate: () => { if (!ui.rateBusy) fetchRate(); return false; },
   resetDayBudget: t => { if (state.dayBudgets) delete state.dayBudgets[t.dataset.v]; },
-  matchTrip: () => { state.tripBudget = tripDays().reduce((s, d) => s + dayBudget(d), 0); },
+  matchTrip: () => { state.tripBudget = tripDays().reduce((s, d) => s + dayBudget(d), 0) + state.expenses.filter(e => e.prepaid).reduce((s, e) => s + expBRL(e), 0); },
   delExp: t => { state.expenses = state.expenses.filter(e => e.id !== t.dataset.id); },
   planDay: t => { ui.planDay = t.dataset.v; },
   addPlanSaved: () => { const v = document.getElementById('planPick').value; if (!v) return false; addPlan({actId:v}); },
