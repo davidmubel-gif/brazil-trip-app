@@ -3140,47 +3140,98 @@ async function addPhotos(files) {
 
 /* ---- fetch free photos from Wikimedia Commons (needs internet once) ---- */
 async function creditsGet(id) { const r = await photosGet('credit:' + id); return Array.isArray(r) ? r : []; }
+// Better Commons searches for places whose own query (a.q) found wrong or no pictures. Tested live, Oct 2026.
+// intitle:"..." means the file name must contain those words.
+const PHOTO_Q = {
+  terraco: ['intitle:"Terraço Itália"', 'intitle:"Edifício Itália"'],
+  farol: ['intitle:"Altino Arantes"', 'intitle:"Farol Santander"'],
+  paulista: ['intitle:"Avenida Paulista" domingo'],
+  estaiada: ['intitle:"Ponte Octávio Frias de Oliveira"'],
+  calixto: ['"Feira Benedito Calixto"', 'intitle:"Praça Benedito Calixto"'],
+  bauxoaugusta: ['intitle:"Rua Augusta" "São Paulo"'],
+  santos: ['intitle:"Bolsa do Café" Santos', 'intitle:"Praia de Santos"'],
+  futebolmatch: ['intitle:"Allianz Parque" Palmeiras', 'intitle:"Pacaembu" estádio'],
+  sesc: ['intitle:"SESC Pompeia" -Linha -Metro'],
+  casafrancisca: ['intitle:"Casa de Francisca" -Herrera -Masana'],
+  jbsp: ['intitle:"Jardim Botânico de São Paulo"'],
+  cristo: ['intitle:"Christ the Redeemer" Rio', 'intitle:"Cristo Redentor" Corcovado'],
+  cariocagema: ['intitle:"Carioca da Gema" Lapa', 'intitle:"Rua do Lavradio"'],
+  hippie: ['intitle:"Praça General Osório" "Rio de Janeiro"'],
+  santateresa: ['intitle:"Santa Teresa" bonde', 'intitle:"Parque das Ruínas"'],
+  saobentorio: ['intitle:"Mosteiro de São Bento (Rio de Janeiro)"', 'intitle:"Mosteiro de São Bento" Rio -Paulo'],
+  jbrj: ['intitle:"Jardim Botânico do Rio de Janeiro" -Archivos'],
+  maracana: ['intitle:"Maracanã" estádio'],
+  praias: ['intitle:"Praia de Ipanema" "Rio de Janeiro"', 'intitle:"Praia de Copacabana" -Maratona']
+};
+// File names that point to the wrong city, or to logos and maps rather than photos
+const PHOTO_WRONG_CITY = {'São Paulo': /rio de janeiro|curitiba|lisbo/i, 'Rio de Janeiro': /s[aã]o paulo|curitiba|porto alegre|lisbo/i};
+const PHOTO_SKIP = /\blogo\b|\bmapa?\b|diagram/i;
+const PHOTO_NONE = new Set(['oborogodo']);   // Commons has no real photo of these; add your own instead
+const PHOTO_GENERIC = new Set(['sao', 'paulo', 'rio', 'janeiro', 'parque', 'museu', 'praca', 'rua', 'avenida', 'the', 'and', 'with']);
+const fold = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+const WIKI_HEADERS = {'Api-User-Agent': 'BrazilTripPWA/1.0 (personal trip planner, low volume)'};
+// fetch that gives up after `ms`, so one stuck download can't freeze "Get photos for all places"
+async function fetchT(url, how, opts = {}, ms = 20000) {
+  const ac = new AbortController(), t = setTimeout(() => ac.abort(), ms);
+  try { const r = await fetch(url, {...opts, signal: ac.signal}); if (!r.ok) throw new Error(r.status); return await r[how](); }
+  finally { clearTimeout(t); }
+}
 async function fetchPlacePhotos(a, onStatus) {
   const have = await photosGet(a.id);
-  if (have.length >= 3) return 0;
-  const queries = [a.q, a.fullName || a.name].filter(Boolean);
+  if (have.length >= 3 || PHOTO_NONE.has(a.id)) return 0;
+  const plain =s => (s || '').replace(/\(.*?\)/g, ' ').replace(/\s+/g, ' ').trim();
+  const queries = [...(PHOTO_Q[a.id] || []), a.q, plain(a.name) + ' ' + a.city, plain(a.fullName || a.name)].filter(Boolean);
+  // words from the place name; photos whose file name contains them are tried first
+  const words = fold(a.name).split(/[^a-z0-9]+/).filter(w => w.length >= 3 && !PHOTO_GENERIC.has(w));
+  const score = t => words.filter(w => fold(t).includes(w)).length;
+  const wrongCity = PHOTO_WRONG_CITY[a.city];
   let hits = [];
-  for (const q of queries) {
+  for (const q of [...new Set(queries)]) {
     const url = 'https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrlimit=15&gsrsearch=' + encodeURIComponent(q) +
       '&prop=imageinfo&iiprop=url|mime|extmetadata&iiurlwidth=1200&format=json&origin=*';
     try {
-      const j = await (await fetch(url)).json();
-      const pages = Object.values((j.query && j.query.pages) || {}).sort((x, y) => x.index - y.index);
+      const j = await fetchT(url, 'json', {headers: WIKI_HEADERS});
+      const pages = Object.values((j.query && j.query.pages) || {}).sort((x, y) => x.index - y.index)
+        .filter(p => !PHOTO_SKIP.test(p.title) && !(wrongCity && wrongCity.test(p.title)));
+      pages.forEach(p => p.s = score(p.title));
+      pages.sort((x, y) => y.s - x.s);   // stable: keeps Commons' order among equals
       hits = pages.map(p => p.imageinfo && p.imageinfo[0]).filter(i => i && /^image\/(jpeg|png)$/.test(i.mime) && i.thumburl);
     } catch (e) { throw new Error('offline'); }
     if (hits.length) break;
   }
   const strip = h => (h || '').replace(/<[^>]*>/g, '').trim();
   const credits = await creditsGet(a.id);
-  let added = 0;
+  let added = 0, fails = 0;
+  photoStalled = false;
   for (const i of hits) {
     if (have.length >= 3) break;
+    if (fails >= 2) { photoStalled = true; break; }   // image server is stuck or slow: move on to the next place
     try {
-      const blob = await (await fetch(i.thumburl)).blob();
+      const blob = await fetchT(i.thumburl, 'blob');
       have.push(await fileToDataUrl(blob));
       const m = i.extmetadata || {};
       credits.push(strip(m.Artist && m.Artist.value).slice(0, 60) + ' · ' + strip(m.LicenseShortName && m.LicenseShortName.value) + ' · Wikimedia Commons');
-      added++;
-    } catch (e) {}
+      added++; fails = 0;
+    } catch (e) { fails++; }
   }
   if (added) { await photosSet(a.id, have); await photosSet('credit:' + a.id, credits); }
   return added;
 }
+let photoStalled = false;   // set when the last place gave up on slow downloads
 async function fetchAllPhotos(btn) {
-  const list = allActs(); let n = 0, got = 0, none = [];
+  const list = allActs(); let n = 0, got = 0, none = [], slow = [];
   try {
     for (const a of list) {
       n++; btn.textContent = `Fetching ${n}/${list.length}…`;
       const k = await fetchPlacePhotos(a);
-      if (k) got++; else if (!(await photosGet(a.id)).length) none.push(a.name);
+      if (k) got++;
+      if (photoStalled) slow.push(a.name);
+      else if (!k && !(await photosGet(a.id)).length) none.push(a.name);
+      if (k) await new Promise(r => setTimeout(r, 500));   // be gentle with Wikimedia
     }
     btn.textContent = `Done: ${got} places got photos`;
-    alert(`Photos added for ${got} places.` + (none.length ? `\n\nNo photo found for: ${none.join(', ')}` : ''));
+    alert(`Photos added for ${got} places.` + (none.length ? `\n\nNo photo found for: ${none.join(', ')}` : '') +
+      (slow.length ? `\n\nDownloads were too slow for: ${slow.join(', ')}. Tap the button again later to retry.` : ''));
   } catch (e) { btn.textContent = 'No internet. Try again when online.'; }
 }
 async function exportPhotos() {
