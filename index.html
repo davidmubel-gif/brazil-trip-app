@@ -866,6 +866,12 @@
   .perday { display:flex; gap:var(--s3); align-items:flex-start; margin-top:var(--s3); padding:var(--s3); border-radius:12px; background:var(--ok-bg); color:var(--ink); }
   .perday .ri { margin:0; }
   .perday.neg { background:var(--warn-bg); color:var(--warn); }
+  .curpick { margin-top:var(--s2); }
+  .curpick .seg { margin-top:0; }
+  .curpick #expConv { min-height:20px; margin-top:4px; }
+  .expamt { display:flex; flex-direction:column; align-items:flex-end; text-align:right; flex:none; }
+  .expamt .muted { font-size:13px; }
+  .copline { font-size:13px; }
   .exp { display:flex; align-items:center; gap:var(--s3); padding:var(--s2) 0; border-top:1px solid var(--line); }
   .exp:first-of-type { border-top:0; }
   .exp > .ri { margin:0; }
@@ -3367,7 +3373,11 @@ async function importPhotos(file) {
   } catch (e) { alert('That file could not be read.'); }
 }
 
-function spentOn(date) { return state.expenses.filter(e => e.date === date).reduce((s,e) => s + e.amt, 0); }
+// Each expense keeps the currency it was typed in: R$ ones have "amt"; COP ones have cur:"COP" and "cop",
+// and their R$ value follows the current exchange rate
+const expBRL = e => e.cur === "COP" ? (state.rate > 0 ? e.cop / state.rate : 0) : e.amt;
+const expCOP = e => e.cur === "COP" ? e.cop : e.amt * state.rate;
+function spentOn(date) { return state.expenses.filter(e => e.date === date).reduce((s,e) => s + expBRL(e), 0); }
 
 // Budgets: a default daily amount, optional per-day overrides, and a trip total that follows
 // "daily × days" until you set it yourself
@@ -3375,6 +3385,13 @@ const dayBudget = d => (state.dayBudgets && state.dayBudgets[d] !== undefined) ?
 const tripBudget = () => state.tripBudget !== undefined ? state.tripBudget : state.daily * tripDays().length;
 const brazilToday = () => new Date(Date.now() - 3*3600*1000).toISOString().slice(0,10); // Brazil date (UTC-3)
 const cop = v => '≈ COP ' + money(v * state.rate);
+const copAmt = v => 'COP ' + money(v);
+// "≈ R$ 12,00" / "≈ COP 9.000" under the amount box while typing
+function expPreview() {
+  const box = document.getElementById('expAmt'), out = document.getElementById('expConv'); if (!box || !out) return;
+  const v = parseFloat(box.value);
+  out.textContent = v > 0 ? (state.lastCur === 'COP' ? '≈ ' + brl(state.rate > 0 ? v / state.rate : 0) : cop(v)) : '';
+}
 function renderBudget() {
   const days = tripDays();
   const todayIso = brazilToday();
@@ -3382,7 +3399,7 @@ function renderBudget() {
   const spentDay = spentOn(selDate), budDay = dayBudget(selDate), custom = state.dayBudgets && state.dayBudgets[selDate] !== undefined;
   const leftDay = budDay - spentDay;
   const trip = tripBudget(), sumDays = days.reduce((s, d) => s + dayBudget(d), 0);
-  const totalSpent = state.expenses.reduce((s,e) => s + e.amt, 0);
+  const totalSpent = state.expenses.reduce((s,e) => s + expBRL(e), 0);
   const totalLeft = trip - totalSpent;
   // the days still ahead, today included (all of them before the trip, none after it)
   const ahead = todayIso < days[0] ? days : days.filter(d => d >= todayIso);
@@ -3396,8 +3413,11 @@ function renderBudget() {
     return `<div class="bar ${spent > of ? 'over' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(p)}"><i style="width:${p}%"></i></div>`; };
   const log = state.expenses.filter(e => e.date === selDate).map(e => `
     <div class="exp">${ic('receipt')}
-      <div class="grow">${esc(e.note||'Expense')}<div class="muted">${cop(e.amt)}</div></div>
-      <b>${brl(e.amt)}</b><button class="x" data-act="delExp" data-id="${e.id}" aria-label="Delete expense ${esc(e.note || brl(e.amt))}">×</button></div>`).join('');
+      <div class="grow">${esc(e.note||'Expense')}</div>
+      <div class="expamt"><b>${e.cur === 'COP' ? copAmt(e.cop) : brl(e.amt)}</b>
+        <div class="muted">${e.cur === 'COP' ? '≈ ' + brl(expBRL(e)) : cop(e.amt)}</div></div>
+      <button class="x" data-act="delExp" data-id="${e.id}" aria-label="Delete expense ${esc(e.note || (e.cur === 'COP' ? copAmt(e.cop) : brl(e.amt)))}">×</button></div>`).join('');
+  const curCOP = state.lastCur === 'COP';
   return `
     <div class="chips nowrap" id="daychips">${chips}</div>
     <div class="card hero-b">
@@ -3406,6 +3426,7 @@ function renderBudget() {
       <div class="muted">${cop(leftDay)}</div>
       ${bar(spentDay, budDay)}
       <div class="muted">Spent ${brl(spentDay)} of ${brl(budDay)}</div>
+      <div class="muted copline">COP ${money(spentDay * state.rate)} of ${money(budDay * state.rate)}</div>
       <div class="daybud">
         <label class="muted" for="dayBud">Budget for this day (R$)</label>
         <div class="row"><input id="dayBud" type="number" inputmode="decimal" min="0" value="${budDay}" data-act="setDayBudget" data-v="${selDate}">
@@ -3416,12 +3437,18 @@ function renderBudget() {
     <div class="card"><b>Log an expense</b>
       <div class="grid2" style="margin-top:var(--s2)">
         <label class="muted">Day<select id="expDate" data-act="expDate">${dayOpts}</select></label>
-        <label class="muted">Amount (R$)<input id="expAmt" type="number" inputmode="decimal" placeholder="0,00"></label>
+        <label class="muted"><span id="expAmtLbl">Amount (${curCOP ? 'COP' : 'R$'})</span><input id="expAmt" type="number" inputmode="decimal" min="0" placeholder="${curCOP ? '0' : '0,00'}"></label>
+      </div>
+      <div class="curpick">
+        <div class="seg" role="group" aria-label="Currency of this expense">
+          <button class="${curCOP ? '' : 'on'}" aria-pressed="${!curCOP}" data-act="setCur" data-v="BRL">R$ reais</button>
+          <button class="${curCOP ? 'on' : ''}" aria-pressed="${curCOP}" data-act="setCur" data-v="COP">COP pesos</button></div>
+        <div class="muted" id="expConv" aria-live="polite"></div>
       </div>
       <label class="muted" style="display:block;margin-top:var(--s2)">What for?<input id="expNote" placeholder="Optional, e.g. lunch"></label>
       <button class="btn act wide" data-act="addExp">Add expense</button>
     </div>
-    <div class="card"><div class="row"><b class="grow">Spent on ${dayLabel(selDate)}</b><span class="muted">${brl(spentDay)}</span></div>
+    <div class="card"><div class="row"><b class="grow">Spent on ${dayLabel(selDate)}</b><span class="expamt"><b>${brl(spentDay)}</b><span class="muted">${cop(spentDay)}</span></span></div>
       ${log || `<div class="empty">${ic('receipt')}<span>Nothing logged for this day yet. Expenses you add appear here.</span></div>`}
     </div>
     <div class="card">
@@ -3430,6 +3457,7 @@ function renderBudget() {
       <div class="muted" style="text-align:right">${cop(trip)}</div>
       ${bar(totalSpent, trip)}
       <div class="muted">Spent ${brl(totalSpent)} of ${brl(trip)}</div>
+      <div class="muted copline">COP ${money(totalSpent * state.rate)} of ${money(trip * state.rate)}</div>
       <div class="${totalLeft<0?'neg':''}" style="margin-top:var(--s1)"><b>Left: ${brl(totalLeft)}</b> <span class="muted">${cop(totalLeft)}</span></div>
       ${perDay !== null ? `<div class="perday ${perDay < 0 ? 'neg' : ''}">${ic('cal')}<div><b>About ${brl(perDay)} a day</b> for the ${ahead.length} day${ahead.length === 1 ? '' : 's'} left${ahead.length < days.length ? ', today included' : ''}
         <div class="muted">${cop(perDay)} a day</div></div></div>` : '<div class="muted" style="margin-top:var(--s2)">The trip is over.</div>'}
@@ -3993,8 +4021,20 @@ const actions = {
     state.customActs.push(a); state.saved[a.id] = true;
   },
   addExp: () => {
-    const amt = parseFloat(document.getElementById('expAmt').value); if (!(amt > 0)) return false;
-    state.expenses.push({id:uid(), date:document.getElementById('expDate').value, amt, note:document.getElementById('expNote').value.trim()});
+    const v = parseFloat(document.getElementById('expAmt').value); if (!(v > 0)) return false;
+    const e = {id:uid(), date:document.getElementById('expDate').value, note:document.getElementById('expNote').value.trim()};
+    if (state.lastCur === 'COP') Object.assign(e, {cur:'COP', cop:v}); else e.amt = v;
+    state.expenses.push(e);
+  },
+  // switch the form's currency in place, so a half-typed amount isn't lost; remembered for next time
+  setCur: t => {
+    state.lastCur = t.dataset.v; save();
+    const isCOP = state.lastCur === 'COP';
+    t.parentElement.querySelectorAll('button').forEach(b => { const on = b.dataset.v === state.lastCur; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
+    document.getElementById('expAmtLbl').textContent = 'Amount (' + (isCOP ? 'COP' : 'R$') + ')';
+    document.getElementById('expAmt').placeholder = isCOP ? '0' : '0,00';
+    expPreview();
+    return false;
   },
   budgetDay: t => { ui.expDate = t.dataset.v; },
   resetDayBudget: t => { if (state.dayBudgets) delete state.dayBudgets[t.dataset.v]; },
@@ -4032,6 +4072,7 @@ document.getElementById('main').addEventListener('click', e => {
   save(); render();
 });
 // Text boxes and dropdowns save when you finish typing / choose (without redrawing, so the keyboard stays open)
+document.getElementById('main').addEventListener('input', e => { if (e.target.id === 'expAmt') expPreview(); });
 document.getElementById('main').addEventListener('change', e => {
   const t = e.target, a = t.dataset.act;
   if (a === 'setConf') { state.docs.find(d => d.id === t.dataset.id).conf = t.value.trim(); save(); }
