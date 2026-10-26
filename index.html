@@ -885,6 +885,11 @@
   .toast { position:fixed; z-index:45; left:var(--s4); right:var(--s4); bottom:calc(var(--nav-h) + var(--s3)); max-width:608px; margin:0 auto; display:flex; align-items:center; gap:var(--s3);
     background:var(--ink); color:var(--bg); border-radius:14px; padding:var(--s2) var(--s2) var(--s2) var(--s4); box-shadow:0 4px 16px rgba(0,0,0,.25); font-size:14px; font-weight:600; }
   .toast .ghost { color:var(--bg); border-color:transparent; font-weight:800; text-decoration:underline; }
+  .carry { display:flex; gap:var(--s2); align-items:flex-start; margin-top:var(--s2); padding:6px 10px; border-radius:8px; background:var(--ok-bg); color:var(--ok-ink); font-size:13px; font-weight:600; }
+  .carry .ri { width:16px; height:16px; margin:1px 0 0; stroke:currentColor; }
+  .carry.neg { background:var(--warn-bg); color:var(--warn); }
+  .carryset { align-items:flex-start; border-top:0; padding:var(--s2) 0; }
+  .carryset > span { display:flex; flex-direction:column; gap:2px; }
   .spread { display:flex; align-items:center; gap:var(--s2); margin-top:var(--s3); font-size:14px; }
   .spread button { width:var(--tap); height:var(--tap); border:1px solid var(--line); border-radius:12px; background:var(--bg); color:var(--ink); font:inherit; font-size:22px; font-weight:700; }
   .spread b { min-width:64px; text-align:center; }
@@ -3423,6 +3428,13 @@ function spentOn(date) { return state.expenses.filter(e => e.date === date).redu
 const dayBudget = d => (state.dayBudgets && state.dayBudgets[d] !== undefined) ? state.dayBudgets[d] : state.daily;
 const tripBudget = () => state.tripBudget !== undefined ? state.tripBudget : state.daily * tripDays().length;
 const brazilToday = () => new Date(Date.now() - 3*3600*1000).toISOString().slice(0,10); // Brazil date (UTC-3)
+// Carry-over (optional, off by default): once a day is over, what was left (or overspent) moves to the next day.
+// Only finished days pass money on, so today keeps its carry until midnight.
+function dayAvailable(d) {
+  const base = dayBudget(d), days = tripDays(), i = days.indexOf(d);
+  if (!state.carry || i <= 0 || days[i - 1] >= brazilToday()) return base;
+  return base + dayAvailable(days[i - 1]) - spentOn(days[i - 1]);
+}
 const cop = v => '≈ COP ' + money(v * state.rate);
 const copAmt = v => 'COP ' + money(v);
 // Spending categories: [id, label, icon]; expenses logged before categories existed count as "other"
@@ -3536,7 +3548,9 @@ function renderBudget() {
   const todayIso = brazilToday();
   const selDate = ui.expDate && days.includes(ui.expDate) ? ui.expDate : (days.includes(todayIso) ? todayIso : days[0]);
   const spentDay = spentOn(selDate), budDay = dayBudget(selDate), custom = state.dayBudgets && state.dayBudgets[selDate] !== undefined;
-  const leftDay = budDay - spentDay;
+  // what this day really has to spend: its own budget plus any carry-over from finished days
+  const availDay = dayAvailable(selDate), carryIn = availDay - budDay;
+  const leftDay = availDay - spentDay;
   const trip = tripBudget(), sumDays = days.reduce((s, d) => s + dayBudget(d), 0);
   const totalSpent = state.expenses.reduce((s,e) => s + expBRL(e), 0);
   const totalLeft = trip - totalSpent;
@@ -3567,9 +3581,10 @@ function renderBudget() {
       <div class="muted">${selDate === todayIso ? 'Left today' : 'Left for ' + dayLabel(selDate)}</div>
       <div class="bignum ${leftDay<0?'neg':''}">${brl(leftDay)}</div>
       <div class="muted">${cop(leftDay)}</div>
-      ${bar(spentDay, budDay)}
-      <div class="muted">Spent ${brl(spentDay)} of ${brl(budDay)}</div>
-      <div class="muted copline">COP ${money(spentDay * state.rate)} of ${money(budDay * state.rate)}</div>
+      ${bar(spentDay, availDay)}
+      <div class="muted">Spent ${brl(spentDay)} of ${brl(availDay)}</div>
+      <div class="muted copline">COP ${money(spentDay * state.rate)} of ${money(availDay * state.rate)}</div>
+      ${state.carry && Math.abs(carryIn) >= 0.01 ? `<div class="carry ${carryIn < 0 ? 'neg' : ''}">${ic(carryIn < 0 ? 'warn' : 'cal')}<span>${carryIn > 0 ? `Includes ${brl(carryIn)} carried over from yesterday` : `${brl(-carryIn)} less: yesterday went over budget`} <span class="muted">(${cop(Math.abs(carryIn))})</span></span></div>` : ''}
       <div class="daybud">
         <label class="muted" for="dayBud">Budget for this day (R$)</label>
         <div class="row"><input id="dayBud" type="number" inputmode="decimal" min="0" value="${budDay}" data-act="setDayBudget" data-v="${selDate}">
@@ -3640,13 +3655,15 @@ function renderBudget() {
         <button class="ghost" data-act="addPrepaid">Add prepaid cost</button>
       </div>
     </div>
-    <details class="card dt settings"><summary><b>Settings</b><span class="muted">${brl(trip)} trip · ${brl(state.daily)} a day · ${money(state.rate)} COP per R$</span>${ic('chev', 'ri chev')}</summary>
+    <details class="card dt settings"><summary><b>Settings</b><span class="muted">${brl(trip)} trip · ${brl(state.daily)} a day${state.carry ? " · carry-over on" : ""} · ${money(state.rate)} COP per R$</span>${ic('chev', 'ri chev')}</summary>
       <label class="muted" style="display:block">Trip budget (R$)<input id="setTrip" type="number" inputmode="decimal" min="0" value="${trip}" data-act="setTrip"></label>
       <div class="muted" style="margin:2px 0 var(--s2)">${cop(trip)}${state.tripBudget === undefined ? ' · follows the daily budget × ' + days.length + ' days until you change it' : ''}</div>
       <div class="grid2">
         <label class="muted">Default daily budget (R$)<input id="setDaily" type="number" inputmode="decimal" min="0" value="${state.daily}" data-act="setDaily"></label>
         <label class="muted">COP per 1 R$<input id="setRate" type="number" inputmode="decimal" value="${state.rate}" data-act="setRate"></label>
       </div>
+      <label class="check carryset"><input type="checkbox" ${state.carry ? 'checked' : ''} data-act="toggleCarry">
+        <span><b>Carry leftovers to the next day</b><span class="muted">When a day ends, money you didn't spend is added to the next day, and overspending is taken off it.</span></span></label>
       <p class="muted">The default applies to every day without its own budget. Tap "Update" at the top of Budget for today's rate, or type your own (for example your bank's rate).
         Rates by <a href="https://www.exchangerate-api.com" target="_blank" rel="noopener">Exchange Rate API</a>.</p>
     </details>`;
@@ -4255,6 +4272,7 @@ const actions = {
     return false;
   },
   budgetDay: t => { ui.expDate = t.dataset.v; },
+  toggleCarry: () => { state.carry = !state.carry; },
   getRate: () => { if (!ui.rateBusy) fetchRate(); return false; },
   resetDayBudget: t => { if (state.dayBudgets) delete state.dayBudgets[t.dataset.v]; },
   matchTrip: () => { state.tripBudget = tripDays().reduce((s, d) => s + dayBudget(d), 0) + state.expenses.filter(e => e.prepaid).reduce((s, e) => s + expBRL(e), 0); },
