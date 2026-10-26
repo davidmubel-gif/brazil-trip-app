@@ -864,6 +864,19 @@
   .hero-b.near { border-color:var(--c-activities); }
   .hero-b.over { border-color:var(--warn); }
   .bignum.sm { font-size:30px; margin-top:var(--s1); }
+  .dochead { display:flex; align-items:baseline; gap:var(--s2); margin:var(--s4) 2px 0; font-size:15px; }
+  .dochead .muted { font-size:13px; font-weight:600; }
+  .doc { scroll-margin-top:var(--s3); }
+  .nextup { border:2px solid var(--accent); }
+  .nextup.none { display:flex; gap:var(--s3); align-items:flex-start; border:1px dashed var(--line); }
+  .nextup .doc-h { margin:var(--s1) 0 var(--s2); }
+  .nextwhen { font-size:26px; font-weight:800; letter-spacing:-.01em; color:var(--accent); margin-bottom:2px; }
+  .nextcode { margin-top:var(--s2); font-size:15px; }
+  .nextcode b { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; letter-spacing:.03em; }
+  .nextup .ghost { gap:6px; }
+  .nextup .ghost .ri { width:18px; height:18px; margin:0; }
+  .staying { display:flex; gap:var(--s2); align-items:flex-start; margin-top:var(--s3); padding:8px 10px; border-radius:10px; background:var(--ok-bg); color:var(--ink); font-size:14px; }
+  .staying .ri { width:18px; height:18px; margin:1px 0 0; }
   .atts { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:var(--s1); }
   .atts:empty { display:none; }
   .att { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; height:96px; padding:0 0 4px; overflow:hidden; border:1px solid var(--line); border-radius:10px; background:var(--soft); color:var(--ink); font:inherit; }
@@ -4273,6 +4286,62 @@ function docSummary(d) {
     default: return j(fDate(f.date), f.time, f.address);
   }
 }
+// The dated moments of a booking (a stay has two: check-in and check-out). Times are Brazil time.
+function docMoments(d) {
+  const f = d.f || {}, m = (date, time, label) => date ? [{d, date, time: time || '', label}] : [];
+  switch (d.type) {
+    case 'flight': return m(f.date, f.dep, 'Flight departs');
+    case 'bus': return m(f.date, f.dep, 'Departs');
+    case 'stay': return [...m(f.checkIn, f.checkInTime, 'Check-in'), ...m(f.checkOut, f.checkOutTime, 'Check-out')];
+    case 'event': return m(f.date, f.time, 'Starts');
+    case 'tour': return m(f.date, f.time, 'Tour starts');
+    case 'other': return m(f.date, f.time, 'On');
+    default: return [];   // passports and insurance have no "moment"
+  }
+}
+// milliseconds for a moment; a moment without a time counts until the end of its day
+const momentMs = mo => Date.parse(`${mo.date}T${mo.time || '23:59'}:00-03:00`);
+// "today at 19:00", "tomorrow at 07:35", "in 3 days", "in 45 min"
+function countdown(mo) {
+  const now = Date.now(), ms = momentMs(mo), today = brazilToday();
+  const days = Math.round((new Date(mo.date + 'T12:00:00') - new Date(today + 'T12:00:00')) / 864e5);
+  if (mo.time && ms - now > 0 && ms - now < 3600e3) return `in ${Math.max(1, Math.round((ms - now) / 60e3))} min`;
+  const at = mo.time ? ` at ${mo.time}` : '';
+  if (days === 0) return 'today' + at;
+  if (days === 1) return 'tomorrow' + at;
+  return `in ${days} days`;
+}
+// Top of Docs: the next flight, check-in or event, with a countdown, its key details and quick buttons.
+// Also "staying at …" while you're between a check-in and check-out.
+function renderNextUp() {
+  const now = Date.now(), all = state.docs.flatMap(docMoments);
+  if (!all.length) return `<div class="card nextup none">${ic('cal')}<div><b>Next up</b>
+    <div class="muted">Add dates to your bookings (with Edit) and the next flight, check-in or event shows here.</div></div></div>`;
+  const next = all.filter(mo => momentMs(mo) >= now).sort((a, b) => momentMs(a) - momentMs(b))[0];
+  const staying = state.docs.filter(d => d.type === 'stay' && d.f && d.f.checkIn && d.f.checkOut)
+    .find(d => Date.parse(`${d.f.checkIn}T${d.f.checkInTime || '14:00'}:00-03:00`) <= now && now < Date.parse(`${d.f.checkOut}T${d.f.checkOutTime || '11:00'}:00-03:00`));
+  const stayLine = staying ? `<div class="staying">${ic('home')}<span>Staying at <b>${esc(staying.title)}</b> until ${fDate(staying.f.checkOut)}${staying.f.address ? ' · ' + esc(staying.f.address) : ''}</span></div>` : '';
+  if (!next) return stayLine ? `<div class="card nextup">${stayLine}</div>` : '';
+  const d = next.d, f = d.f || {}, T = docType(d);
+  const key = d.type === 'flight' ? [f.flightNo || f.airline, f.from && f.to ? `${f.from} → ${f.to}` : '', f.terminal ? 'Terminal ' + f.terminal : '', f.seat ? 'Seat ' + f.seat : '']
+    : d.type === 'bus' ? [f.company, f.from && f.to ? `${f.from} → ${f.to}` : '', f.platform ? 'Platform ' + f.platform : '', f.seat ? 'Seat ' + f.seat : '']
+    : d.type === 'stay' ? [f.address, next.label === 'Check-in' && f.doorCode ? 'Code ' + f.doorCode : '']
+    : [f.venue || f.company || f.meeting, f.address, f.seat];
+  return `<div class="card nextup">
+    <div class="ilabel">Next up</div>
+    <div class="doc-h"><span class="doc-ic">${ic(T.icon)}</span>
+      <div class="grow"><b>${esc(d.title)}</b><div class="muted">${next.label} ${fDate(next.date)}${next.time ? ', ' + next.time : ''}</div></div></div>
+    <div class="nextwhen">${countdown(next)}</div>
+    ${key.filter(Boolean).length ? `<div class="muted">${key.filter(Boolean).map(esc).join(' · ')}</div>` : ''}
+    ${d.conf ? `<div class="nextcode"><span class="muted">${T.code || 'Code'}</span> <b>${esc(d.conf)}</b></div>` : ''}
+    <div class="row" style="flex-wrap:wrap;margin-top:var(--s3)">
+      <span data-nextatt="${d.id}"></span>
+      ${d.conf ? `<button class="ghost" data-act="copy" data-id="${d.id}">${ic('copy')}<span>Copy code</span></button>` : ''}
+      <button class="ghost" data-act="jumpDoc" data-id="${d.id}">Details</button>
+    </div>
+    ${stayLine}
+  </div>`;
+}
 // filled-in fields as label/value rows
 const docFields = d => docType(d).fields.filter(([k]) => d.f && d.f[k]).map(([k, l, ty]) =>
   `<div class="kv"><span class="muted">${l}</span><span>${ty === 'date' ? fDate(d.f[k]) : esc(d.f[k])}</span></div>`).join('');
@@ -4338,6 +4407,10 @@ async function addDocFiles(docId, files) {
 }
 // fill each card's attachment strip after the page is drawn
 async function loadDocAtts() {
+  for (const el of document.querySelectorAll('[data-nextatt]')) {   // "Show ticket" on the Next up card
+    const id = el.dataset.nextatt, list = await photosGet(attKey(id));
+    el.innerHTML = list.length ? `<button class="ghost" data-act="openAtt" data-id="${id}" data-i="0">${ic('img')}<span>Show ticket</span></button>` : '';
+  }
   for (const el of document.querySelectorAll('[data-docatt]')) {
     const id = el.dataset.docatt, list = await photosGet(attKey(id));
     el.innerHTML = list.map((a, i) => `<button class="att" data-act="openAtt" data-id="${id}" data-i="${i}" aria-label="Open ${esc(a.name)}">
@@ -4402,9 +4475,9 @@ function renderBackupCard() {
 function renderDocs() {
   const usedIn = d => { const u = docUses(d.id); return u.length ? `<div class="ilabel" style="margin-top:var(--s2)">Used in your plan</div>
       <div class="chips">${u.map(x => `<button class="chip" data-act="goPlanDay" data-v="${x.date}">${dayLabel(x.date)} · ${esc(itemName(x.it))}</button>`).join('')}</div>` : ''; };
-  const cards = state.docs.map(d => {
+  const cardOf = d => {
     const done = d.checks.filter(c => c.d).length, T = docType(d), sum = docSummary(d);
-    return `<div class="card doc">
+    return `<div class="card doc" id="doc-${d.id}">
       <div class="doc-h"><span class="doc-ic">${ic(T.icon)}</span>
         <div class="grow"><b>${esc(d.title)}</b><div class="muted">${T.label}${sum ? ' · ' + esc(sum) : ''}</div></div>
         ${d.conf ? '<span class="tag okTag">Booked</span>' : ''}
@@ -4425,10 +4498,19 @@ function renderDocs() {
         || '<div class="muted" style="padding:var(--s2) 0">No checklist yet. Add the things to sort out before you go.</div>'}</div>
       <div class="row addrow"><input placeholder="Add a checklist item" id="chk-${d.id}" aria-label="New checklist item for ${esc(d.title)}"><button class="ghost" data-act="addCheck" data-id="${d.id}">Add</button></div>
     </div>`;
-  }).join('');
+  };
+  // group by the day of each booking's first moment, in time order; then documents; then undated
+  const first = d => docMoments(d)[0];
+  const dated = state.docs.filter(first).sort((a, b) => (first(a).date + (first(a).time || '99')).localeCompare(first(b).date + (first(b).time || '99')));
+  const days = [...new Set(dated.map(d => first(d).date))];
+  const docsOnly = state.docs.filter(d => !first(d) && (d.type === 'id' || d.type === 'insurance'));
+  const undated = state.docs.filter(d => !first(d) && d.type !== 'id' && d.type !== 'insurance');
+  const section = (title, list, note) => list.length ? `<h3 class="dochead">${title}${note ? `<span class="muted">${note}</span>` : ''}</h3>${list.map(cardOf).join('')}` : '';
+  const cards = days.map(day => section(dayLabel(day), dated.filter(d => first(d).date === day), day === brazilToday() ? 'Today' : '')).join('')
+    + section('Documents', docsOnly) + section('No date yet', undated, 'add a date with Edit');
   const empty = `<div class="card empty big-empty">${ic('note')}<div><b>No documents yet</b>
     <div class="muted">Add your flights, stays and bus tickets so their confirmation numbers are one tap away, even offline.</div></div></div>`;
-  return (cards || empty) + `<div class="card"><b>Add a booking or document</b>
+  return renderNextUp() + (cards || empty) + `<div class="card"><b>Add a booking or document</b>
       <div class="grid2" style="margin-top:var(--s2)">
         <label class="muted">Name<input id="newDoc" placeholder="Travel insurance"></label>
         <label class="muted">Type<select id="newDocType">${Object.entries(DOC_TYPES).map(([k, t]) => `<option value="${k}">${t.label}</option>`).join('')}</select></label>
@@ -4647,13 +4729,14 @@ const actions = {
   },
   delDoc: t => { if (confirm('Delete this booking and its files?')) { state.docs = state.docs.filter(d => d.id !== t.dataset.id); photosSet(attKey(t.dataset.id), []).catch(() => {}); ui.docEdit = null; } else return false; },
   openAtt: t => { openAtt(t.dataset.id, +t.dataset.i); return false; },
+  jumpDoc: t => { const el = document.getElementById('doc-' + t.dataset.id); if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'}); return false; },
   copy: t => {
     const d = state.docs.find(x => x.id === t.dataset.id); if (!d) return false;
     const box = document.getElementById('conf-' + d.id); if (box) d.conf = box.value.trim();   // just typed, not saved yet
     if (!d.conf) return false;
     save();
-    const lbl = t.querySelector('span') || t;
-    (navigator.clipboard ? navigator.clipboard.writeText(d.conf) : Promise.reject()).then(() => { lbl.textContent = 'Copied'; setTimeout(() => lbl.textContent = 'Copy', 1200); }).catch(() => {});
+    const lbl = t.querySelector('span') || t, label = lbl.textContent;
+    (navigator.clipboard ? navigator.clipboard.writeText(d.conf) : Promise.reject()).then(() => { lbl.textContent = 'Copied'; setTimeout(() => lbl.textContent = label, 1200); }).catch(() => {});
     return false;
   },
 };
