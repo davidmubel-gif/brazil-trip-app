@@ -866,6 +866,10 @@
   .perday { display:flex; gap:var(--s3); align-items:flex-start; margin-top:var(--s3); padding:var(--s3); border-radius:12px; background:var(--ok-bg); color:var(--ink); }
   .perday .ri { margin:0; }
   .perday.neg { background:var(--warn-bg); color:var(--warn); }
+  .rateline { display:flex; align-items:center; gap:var(--s3); margin:var(--s1) 0 0; padding:var(--s2) var(--s3); border:1px solid var(--line); border-radius:12px; background:var(--card); font-size:14px; }
+  .rateline.stale { border-color:var(--warn); background:var(--warn-bg); }
+  .rateline.stale .muted { color:var(--warn); }
+  .rateline .ghost { flex:none; }
   .curpick { margin-top:var(--s2); }
   .curpick .seg { margin-top:0; }
   .curpick #expConv { min-height:20px; margin-top:4px; }
@@ -3386,6 +3390,43 @@ const tripBudget = () => state.tripBudget !== undefined ? state.tripBudget : sta
 const brazilToday = () => new Date(Date.now() - 3*3600*1000).toISOString().slice(0,10); // Brazil date (UTC-3)
 const cop = v => '≈ COP ' + money(v * state.rate);
 const copAmt = v => 'COP ' + money(v);
+// Today's BRL→COP rate: ExchangeRate-API's free open endpoint, with the free currency API on jsDelivr as a backup.
+// Offline, or if both fail, the last saved rate keeps working.
+const RATE_SOURCES = [
+  {name: 'ExchangeRate-API', url: 'https://open.er-api.com/v6/latest/BRL',
+   read: j => j.result === 'success' && j.rates && {rate: j.rates.COP, date: new Date(j.time_last_update_unix * 1000).toISOString().slice(0, 10)}},
+  {name: 'free currency API (jsDelivr)', url: 'https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/brl.json',
+   read: j => j.brl && {rate: j.brl.cop, date: j.date}}
+];
+const shortDate = iso => new Date(iso + 'T12:00:00').toLocaleDateString('en-US', {month: 'short', day: 'numeric'});
+async function fetchRate() {
+  ui.rateBusy = true; ui.rateMsg = ''; render();
+  let got = null;
+  for (const s of RATE_SOURCES) {
+    try {
+      const r = s.read(await fetchT(s.url, 'json', {cache: 'no-store'}, 10000));
+      if (r && r.rate > 100 && r.rate < 5000) { got = Object.assign(r, {source: s.name}); break; }   // ignore anything implausible
+    } catch (e) {}
+  }
+  ui.rateBusy = false;
+  if (got) {
+    state.rate = Math.round(got.rate * 100) / 100;
+    state.rateInfo = {source: got.source, date: got.date || brazilToday()};
+    ui.rateMsg = `Updated from ${got.source}.`;
+    save();
+  } else ui.rateMsg = `Couldn't reach the rate services (no internet?). Keeping your saved rate of ${money(state.rate)}.`;
+  if (tab === 'budget') render();
+}
+function rateLine() {
+  const ri = state.rateInfo;
+  const age = ri && ri.date ? Math.round((new Date(brazilToday()) - new Date(ri.date)) / 864e5) : null;
+  const when = !ri ? 'not checked yet' : ri.source === 'manual' ? 'set by you ' + shortDate(ri.date) : 'checked ' + shortDate(ri.date);
+  return `<div class="rateline ${!ri || age > 3 ? 'stale' : ''}">
+      <div class="grow"><b>1 R$ = ${money(state.rate)} COP</b> <span class="muted">· ${when}</span>
+        ${ui.rateMsg ? `<div class="muted" aria-live="polite">${esc(ui.rateMsg)}</div>` : ''}</div>
+      <button class="ghost" data-act="getRate" ${ui.rateBusy ? 'aria-busy="true"' : ''}>${ui.rateBusy ? 'Updating…' : 'Update'}</button>
+    </div>`;
+}
 // "≈ R$ 12,00" / "≈ COP 9.000" under the amount box while typing
 function expPreview() {
   const box = document.getElementById('expAmt'), out = document.getElementById('expConv'); if (!box || !out) return;
@@ -3420,6 +3461,7 @@ function renderBudget() {
   const curCOP = state.lastCur === 'COP';
   return `
     <div class="chips nowrap" id="daychips">${chips}</div>
+    ${rateLine()}
     <div class="card hero-b">
       <div class="muted">${selDate === todayIso ? 'Left today' : 'Left for ' + dayLabel(selDate)}</div>
       <div class="bignum ${leftDay<0?'neg':''}">${brl(leftDay)}</div>
@@ -3472,7 +3514,8 @@ function renderBudget() {
         <label class="muted">Default daily budget (R$)<input id="setDaily" type="number" inputmode="decimal" min="0" value="${state.daily}" data-act="setDaily"></label>
         <label class="muted">COP per 1 R$<input id="setRate" type="number" inputmode="decimal" value="${state.rate}" data-act="setRate"></label>
       </div>
-      <p class="muted">The default applies to every day without its own budget. Update the exchange rate to today's before you go (check Google or your bank).</p>
+      <p class="muted">The default applies to every day without its own budget. Tap "Update" at the top of Budget for today's rate, or type your own (for example your bank's rate).
+        Rates by <a href="https://www.exchangerate-api.com" target="_blank" rel="noopener">Exchange Rate API</a>.</p>
     </details>`;
 }
 
@@ -4037,6 +4080,7 @@ const actions = {
     return false;
   },
   budgetDay: t => { ui.expDate = t.dataset.v; },
+  getRate: () => { if (!ui.rateBusy) fetchRate(); return false; },
   resetDayBudget: t => { if (state.dayBudgets) delete state.dayBudgets[t.dataset.v]; },
   matchTrip: () => { state.tripBudget = tripDays().reduce((s, d) => s + dayBudget(d), 0); },
   delExp: t => { state.expenses = state.expenses.filter(e => e.id !== t.dataset.id); },
@@ -4077,7 +4121,7 @@ document.getElementById('main').addEventListener('change', e => {
   const t = e.target, a = t.dataset.act;
   if (a === 'setConf') { state.docs.find(d => d.id === t.dataset.id).conf = t.value.trim(); save(); }
   else if (a === 'setDaily') { state.daily = parseFloat(t.value) || 0; save(); render(); }
-  else if (a === 'setRate') { state.rate = parseFloat(t.value) || 0; save(); render(); }
+  else if (a === 'setRate') { const v = parseFloat(t.value); if (v > 0) { state.rate = v; state.rateInfo = {source: 'manual', date: brazilToday()}; ui.rateMsg = ''; } save(); render(); }
   else if (a === 'setTrip') { const v = parseFloat(t.value); if (v >= 0) state.tripBudget = v; else delete state.tripBudget; save(); render(); }
   else if (a === 'setDayBudget') { const v = parseFloat(t.value); state.dayBudgets = state.dayBudgets || {};
     if (v >= 0) state.dayBudgets[t.dataset.v] = v; else delete state.dayBudgets[t.dataset.v]; save(); render(); }
