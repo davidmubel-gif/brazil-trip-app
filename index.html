@@ -864,6 +864,19 @@
   .hero-b.near { border-color:var(--c-activities); }
   .hero-b.over { border-color:var(--warn); }
   .bignum.sm { font-size:30px; margin-top:var(--s1); }
+  .bkstrip { padding:var(--s3) var(--s4) var(--s2); }
+  .bkrow { display:flex; align-items:center; gap:var(--s3); width:100%; min-height:var(--tap); padding:6px 0; border:0; border-top:1px solid var(--line); background:none; color:var(--ink); font:inherit; text-align:left; }
+  .bkrow:first-of-type { border-top:0; }
+  .bkrow .ri { margin:0; }
+  .bkrow .bkt { width:44px; flex:none; font-size:13px; font-weight:800; color:var(--accent); }
+  .bkrow .grow { display:flex; flex-direction:column; min-width:0; }
+  .bkrow .muted { font-size:13px; }
+  .ag-bk { display:flex; align-items:center; gap:var(--s2); width:100%; min-height:var(--tap); padding:6px 12px; border:1px dashed var(--accent); border-radius:12px; background:var(--ok-bg); color:var(--ink); font:inherit; font-size:14px; text-align:left; }
+  .ag-bk .ri { width:18px; height:18px; margin:0; }
+  .ag-bk .muted { font-size:12px; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  .suggest { display:flex; flex-wrap:wrap; align-items:center; gap:var(--s2); margin-top:var(--s2); padding:8px 10px; border-radius:10px; background:var(--ok-bg); font-size:14px; }
+  .suggest .ri { width:18px; height:18px; margin:0; }
+  .suggest > .grow { min-width:60%; }
   .dochead { display:flex; align-items:baseline; gap:var(--s2); margin:var(--s4) 2px 0; font-size:15px; }
   .dochead .muted { font-size:13px; font-weight:600; }
   .doc { scroll-margin-top:var(--s3); }
@@ -3908,6 +3921,9 @@ function itemCard(r) {
     <div class="seg" role="group" aria-label="Status">${seg}</div>
     <label class="muted docpick">Attach document<select data-act="setDoc" data-id="${it.id}"><option value="">None</option>${docOpts}</select></label>
     ${docChip(it)}
+    ${(sug => sug ? `<div class="suggest">${ic(docType(sug).icon)}<span class="grow">Attach your booking <b>${esc(sug.title)}</b>?</span>
+      <button class="ghost" data-act="takeSuggest" data-id="${it.id}" data-v="${sug.id}">Attach</button>
+      <button class="ghost" data-act="skipSuggest" data-id="${it.id}" data-v="${sug.id}">No thanks</button></div>` : '')(suggestDoc(it, ui.planDay))}
     ${r.warns.map(w => `<div class="ag-warn">${ic('warn')}<span>${esc(w)}</span></div>`).join('')}
   </div>`;
 }
@@ -3921,12 +3937,16 @@ function renderDocSheet() {
   const d = ui.docSheet && state.docs.find(x => x.id === ui.docSheet); if (!d) return '';
   return `<div class="backdrop" data-act="closeDocSheet"></div>
     <div class="sheet" role="dialog" aria-label="${esc(d.title)}"><div class="grab" aria-hidden="true"></div>
-      <div class="row"><b class="grow" style="font-size:18px">${esc(d.title)}</b><button class="x" data-act="closeDocSheet" aria-label="Close">×</button></div>
-      ${d.notes ? `<div class="muted">${esc(d.notes)}</div>` : ''}
-      <div class="ilabel" style="margin-top:var(--s3)">Confirmation number</div>
+      <div class="doc-h" style="margin-bottom:var(--s2)"><span class="doc-ic">${ic(docType(d).icon)}</span>
+        <div class="grow"><b style="font-size:18px">${esc(d.title)}</b><div class="muted">${docType(d).label}${docSummary(d) ? ' · ' + esc(docSummary(d)) : ''}</div></div>
+        <button class="x" data-act="closeDocSheet" aria-label="Close">×</button></div>
+      ${docFields(d) ? `<div class="kvs">${docFields(d)}</div>` : ''}
+      ${d.notes ? `<div class="docnotes">${esc(d.notes)}</div>` : ''}
+      ${docType(d).code ? `<div class="ilabel" style="margin-top:var(--s2)">${docType(d).code}</div>
       ${d.conf ? `<div class="row"><span class="conf grow">${esc(d.conf)}</span><button class="btn" data-act="copy" data-id="${d.id}">Copy</button></div>`
-               : '<div class="muted">None saved yet. You can add it in Docs.</div>'}
-      <button class="ghost" style="margin-top:var(--s3)" data-act="goDocs">Open in Docs</button>
+               : '<div class="muted">None saved yet. You can add it in Docs.</div>'}` : ''}
+      <div class="row" style="flex-wrap:wrap;margin-top:var(--s3)"><span data-nextatt="${d.id}"></span>
+        <button class="ghost" data-act="goDocs">Open in Docs</button></div>
     </div>`;
 }
 // Bottom sheet for picking a plan item's start time and length with big buttons (no time wheel)
@@ -3959,6 +3979,25 @@ function docUses(id) {
   for (const [date, items] of Object.entries(state.plan)) for (const it of items) if (it.docId === id) out.push({date, it});
   return out.sort((x, y) => x.date.localeCompare(y.date));
 }
+// Bookings that happen on a day (flights, buses, check-ins and check-outs, events, tours), in time order
+const dayBookings = iso => state.docs.flatMap(docMoments).filter(mo => mo.date === iso).sort((a, b) => (a.time || '99').localeCompare(b.time || '99'));
+function bookingStrip(iso) {
+  const list = dayBookings(iso); if (!list.length) return '';
+  return `<div class="card bkstrip"><div class="ilabel">Bookings this day</div>
+    ${list.map(mo => `<button class="bkrow" data-act="openDoc" data-id="${mo.d.id}">${ic(docType(mo.d).icon)}
+      <span class="bkt">${mo.time || '—'}</span><span class="grow"><b>${esc(mo.d.title)}</b><span class="muted">${mo.label}${mo.d.conf ? ' · ' + esc(mo.d.conf) : ''}</span></span></button>`).join('')}</div>`;
+}
+// Suggest a same-day booking for a plan item when they share a real word (venue, company or title vs the place's name)
+const BK_STOP = new Set(['sao', 'paulo', 'rio', 'janeiro', 'the', 'and', 'with', 'para', 'from', 'tour', 'night', 'show', 'ticket', 'tickets', 'day', 'trip', 'test']);
+const bkWords = s => fold(s).split(/[^a-z0-9]+/).filter(w => w.length >= 3 && !BK_STOP.has(w));
+function suggestDoc(it, iso) {
+  if (it.docId) return null;
+  const a = it.actId ? actById(it.actId) : null;
+  const mine = bkWords([itemName(it), a && a.fullName, a && a.area].filter(Boolean).join(' '));
+  if (!mine.length) return null;
+  return dayBookings(iso).map(mo => mo.d).find(d => d.type !== 'stay' && !(it.noSuggest || []).includes(d.id)
+    && bkWords([d.title, d.f.venue, d.f.company, d.f.meeting, d.f.to].filter(Boolean).join(' ')).some(w => mine.some(m => m.startsWith(w) || w.startsWith(m))));
+}
 function fmtDur(min) { const h = Math.floor(min / 60), m = min % 60; return (h ? h + ' h' : '') + (h && m ? ' ' : '') + (m ? m + ' min' : ''); }
 function legLine(A, B) {
   const L = legData({a: A.a}, {a: B.a}, coordsLoad(), routesLoad());
@@ -3971,10 +4010,19 @@ function legLine(A, B) {
 function renderTimeline(m) {
   const ev = m.sched.map(r => ({t: r.start, e: r.end, r}));
   if (m.wOn) ev.push({t: m.ws, e: m.we, work: true});
-  ev.sort((x, y) => x.t - y.t);
+  // timed bookings (flight departs, check-in...) sit in the timeline as markers
+  dayBookings(ui.planDay).filter(mo => mo.time).forEach(mo => ev.push({t: toMin(mo.time), e: toMin(mo.time), bk: mo}));
+  ev.sort((x, y) => x.t - y.t || (x.bk ? -1 : 1));
   if (!ev.length) return `<div class="card muted">No times set yet. Add a place to this day, then set a start time below or tap "Suggest times".</div>`;
   let html = '', prev = null;
   ev.forEach(x => {
+    if (x.bk) {   // a booking marker doesn't break the walk/metro legs between plan items
+      if (prev && x.t - prev.e >= 30) html += `<div class="ag-row"><div class="ag-t"></div><div class="ag-c"><div class="ag-free">Free · ${fmtDur(x.t - prev.e)}</div></div></div>`;
+      if (prev) prev = Object.assign({}, prev, {e: Math.max(prev.e, x.t)});   // free time is counted up to the marker
+      html += `<div class="ag-row"><div class="ag-t">${x.bk.time}</div><div class="ag-c"><button class="ag-bk" data-act="openDoc" data-id="${x.bk.d.id}">${ic(docType(x.bk.d).icon)}
+        <span class="grow"><b>${esc(x.bk.label)}</b> · ${esc(x.bk.d.title)}</span>${x.bk.d.conf ? `<span class="muted">${esc(x.bk.d.conf)}</span>` : ''}</button></div></div>`;
+      return;
+    }
     if (prev && x.t - prev.e >= 30) html += `<div class="ag-row"><div class="ag-t"></div><div class="ag-c"><div class="ag-free">Free · ${fmtDur(x.t - prev.e)}</div></div></div>`;
     if (x.work) {
       html += `<div class="ag-row"><div class="ag-t">${fmtMin(x.t)}</div><div class="ag-c"><div class="ag-work"><b>Work</b><span>${fmtMin(m.ws)} to ${fmtMin(m.we)}</span></div></div></div>`;
@@ -3998,6 +4046,7 @@ function renderTimeline(m) {
 function renderListView(m) {
   const lines = m.sched.map(r => ({t: r.start, h: `<div class="li"><b>${fmtMin(r.start)}–${fmtMin(r.end % 1440)}</b> · ${esc(r.name)}${r.warns.length ? ' <span class="tag warnTag">Check</span>' : ''}${r.it.done ? ' ✓' : ''}</div>`}));
   if (m.wOn) lines.push({t: m.ws, h: `<div class="li muted"><b>${fmtMin(m.ws)}–${fmtMin(m.we)}</b> · Work</div>`});
+  dayBookings(ui.planDay).filter(mo => mo.time).forEach(mo => lines.push({t: toMin(mo.time), h: `<div class="li"><b>${mo.time}</b> · ${esc(mo.label)}: ${esc(mo.d.title)} <span class="tag okTag">Booking</span></div>`}));
   lines.sort((x, y) => x.t - y.t);
   return `<div class="card">${lines.map(l => l.h).join('') || '<span class="muted">No times set yet.</span>'}
     ${m.unsched.length ? `<div class="muted" style="margin-top:8px">No time yet:</div>${m.unsched.map(r => `<div class="li">• ${esc(r.name)}</div>`).join('')}` : ''}</div>`;
@@ -4225,6 +4274,7 @@ function renderPlan() {
     <div class="row" style="padding:4px 0"><h2 class="grow" style="margin:6px 0">${dayLabel(iso)}</h2>
       <button class="ghost" data-act="toggleWork">${m.wOn ? 'Work day' : 'Day off'}</button></div>
     <div class="muted" style="margin:-4px 2px 4px">${m.rows.length} stop${m.rows.length === 1 ? '' : 's'} · ${m.rows.filter(r => r.status === 'booked').length} booked${m.wOn ? ' · work ' + fmtMin(m.ws) + ' to ' + fmtMin(m.we) : ''}</div>
+    ${bookingStrip(iso)}
     ${renderDayMap()}
     ${renderRouteSheet()}
     <div class="chips">
@@ -4526,7 +4576,7 @@ function render() {
   const fn = {explore:renderExplore, budget:renderBudget, plan:renderPlan, docs:renderDocs}[tab];
   document.getElementById('main').innerHTML = fn() + (tab === 'plan' ? renderDocSheet() + renderTimeSheet() : '') + (tab === 'budget' ? renderToast() : '') + (tab === 'docs' ? renderDocEdit() : '');
   if (tab === 'budget') expPreview();
-  if (tab === 'docs') loadDocAtts();
+  if (tab === 'docs' || tab === 'plan') loadDocAtts();
   if (tab === 'explore' && ui.detail) refreshPhotos();
   // centre the chosen day chip by scrolling the chip row sideways only (scrollIntoView also scrolled the page up)
   if (tab === 'plan' || tab === 'budget') { const c = document.querySelector('#daychips .chip.on'), row = document.getElementById('daychips');
@@ -4706,6 +4756,8 @@ const actions = {
   toggleDone: t => { const i = findPlanItem(t.dataset.id); if (i) i.done = !i.done; },
   setStatus: t => { const i = findPlanItem(t.dataset.id); if (i) { i.status = t.dataset.v; i.booked = i.status === 'booked'; } },
   openDoc: t => { ui.docSheet = t.dataset.id; },
+  takeSuggest: t => { const i = findPlanItem(t.dataset.id); if (i) i.docId = t.dataset.v; },
+  skipSuggest: t => { const i = findPlanItem(t.dataset.id); if (i) (i.noSuggest ||= []).push(t.dataset.v); },
   closeDocSheet: () => { ui.docSheet = null; },
   goDocs: () => { ui.docSheet = null; tab = 'docs'; window.scrollTo(0, 0); },
   goPlanDay: t => { tab = 'plan'; ui.planDay = t.dataset.v; window.scrollTo(0, 0); },
