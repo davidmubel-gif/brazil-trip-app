@@ -2,7 +2,7 @@
 // First visit: it saves a copy of the app files. After that: it serves those saved copies,
 // so the app opens even with no internet. Bump CACHE ("v2", "v3"...) whenever you update the app.
 // Map tiles you have looked at are also kept (in TILES) so those map areas still show offline.
-const CACHE = 'trip-v35';
+const CACHE = 'trip-v36';
 const TILES = 'trip-tiles';
 const MAX_TILES = 3000;   // about 60 MB; the oldest tiles are dropped first
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];

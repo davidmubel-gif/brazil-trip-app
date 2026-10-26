@@ -863,6 +863,7 @@
   .bar.near i { background:var(--c-activities); }
   .hero-b.near { border-color:var(--c-activities); }
   .hero-b.over { border-color:var(--warn); }
+  .bignum.sm { font-size:30px; margin-top:var(--s1); }
   .hist { display:flex; flex-direction:column; margin-top:var(--s2); }
   .hrow { display:grid; grid-template-columns:76px 1fr auto; align-items:center; gap:var(--s3); min-height:var(--tap); padding:4px var(--s2); margin:0 calc(-1 * var(--s2));
     border:0; border-top:1px solid var(--line); border-radius:0; background:none; color:var(--ink); font:inherit; font-size:14px; text-align:left; }
@@ -3456,6 +3457,20 @@ function dayAvailable(d) {
 }
 const cop = v => '≈ COP ' + money(v * state.rate);
 const copAmt = v => 'COP ' + money(v);
+// Cash or card: card spending can carry a bank fee (Settings), shown as its real cost in COP
+const PAY_LABEL = {cash: 'Cash', card: 'Card'};
+const cardFee = () => Math.max(0, state.cardFee || 0);
+const withFee = e => e.pay === 'card' && cardFee() > 0 ? 1 + cardFee() / 100 : 1;
+function expOther(e) {   // the line under an expense's amount
+  const fee = withFee(e) > 1;
+  if (e.cur === 'COP') return '≈ ' + brl(expBRL(e)) + (fee ? ` · ${copAmt(Math.round(e.cop * withFee(e)))} with card fee` : '');
+  return fee ? `≈ ${copAmt(Math.round(expCOP(e) * withFee(e)))} with card fee` : cop(e.amt);
+}
+// Cash in the wallet: ATM withdrawals (or cash brought along) minus everything paid in cash, in R$
+function walletLeft() {
+  const tops = (state.wallet || []).reduce((s, w) => s + w.amt, 0);
+  return tops - state.expenses.filter(e => e.pay === 'cash').reduce((s, e) => s + expBRL(e), 0);
+}
 // Spending categories: [id, label, icon]; expenses logged before categories existed count as "other"
 const CATS = [['food', 'Food', 'fork'], ['transport', 'Transport', 'train'], ['stay', 'Stay', 'home'], ['activities', 'Activities', 'ticket'],
   ['shopping', 'Shopping', 'bag'], ['nightlife', 'Nightlife', 'music'], ['other', 'Other', 'dots']];
@@ -3593,9 +3608,10 @@ function renderBudget() {
     return `<div class="bar ${spent > of ? 'over' : of > 0 && spent >= of * 0.8 ? 'near' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(p)}"><i style="width:${p}%"></i></div>`; };
   const log = state.expenses.filter(e => e.date === selDate).map(e => `
     <div class="exp">${catIc(catOf(e))}
-      <div class="grow">${esc(e.note || catOf(e)[1])}${e.note || e.group ? `<div class="muted">${e.note ? catOf(e)[1] : ''}${e.note && e.group ? ' · ' : ''}${e.group ? `part ${e.part} of ${e.parts}` : ''}</div>` : ''}</div>
+      <div class="grow">${esc(e.note || catOf(e)[1])}${(() => { const bits = [e.note ? catOf(e)[1] : '', e.group ? `part ${e.part} of ${e.parts}` : '', PAY_LABEL[e.pay] || ''].filter(Boolean);
+        return bits.length ? `<div class="muted">${bits.join(' · ')}</div>` : ''; })()}</div>
       <div class="expamt"><b>${e.cur === 'COP' ? copAmt(e.cop) : brl(e.amt)}</b>
-        <div class="muted">${e.cur === 'COP' ? '≈ ' + brl(expBRL(e)) : cop(e.amt)}</div></div>
+        <div class="muted">${expOther(e)}</div></div>
       <button class="x" data-act="delExp" data-id="${e.id}" aria-label="Delete expense ${esc(e.note || (e.cur === 'COP' ? copAmt(e.cop) : brl(e.amt)))}">×</button></div>`).join('');
   const curCOP = state.lastCur === 'COP';
   return `
@@ -3624,6 +3640,8 @@ function renderBudget() {
         <div class="seg" role="group" aria-label="Currency of this expense">
           <button class="${curCOP ? '' : 'on'}" aria-pressed="${!curCOP}" data-act="setCur" data-v="BRL">R$ reais</button>
           <button class="${curCOP ? 'on' : ''}" aria-pressed="${curCOP}" data-act="setCur" data-v="COP">COP pesos</button></div>
+        <div class="seg" role="group" aria-label="Paid with" style="margin-top:6px">
+          ${['card', 'cash'].map(p => `<button class="${(state.lastPay || 'card') === p ? 'on' : ''}" aria-pressed="${(state.lastPay || 'card') === p}" data-act="setPay" data-v="${p}">${p === 'card' ? 'Card' : 'Cash'}</button>`).join('')}</div>
       </div>
       <div class="kpshow" aria-live="polite"><span id="kpAmt">${kpText()}</span><span class="muted" id="expConv"></span></div>
       <div class="keypad" role="group" aria-label="Amount keypad">${['1','2','3','4','5','6','7','8','9', curCOP ? '000' : ',', '0', 'del'].map(k =>
@@ -3643,6 +3661,20 @@ function renderBudget() {
     </div>
     <div class="card"><div class="row"><b class="grow">Spent on ${dayLabel(selDate)}</b><span class="expamt"><b>${brl(spentDay)}</b><span class="muted">${cop(spentDay)}</span></span></div>
       ${log || `<div class="empty">${ic('receipt')}<span>Nothing logged for this day yet. Expenses you add appear here.</span></div>`}
+    </div>
+    <div class="card wallet"><div class="row"><b class="grow">Cash in my wallet</b></div>
+      <div class="bignum sm ${walletLeft() < 0 ? 'neg' : ''}">${brl(walletLeft())}</div>
+      <div class="muted">${cop(walletLeft())}${(state.wallet || []).length ? ` · ${brl((state.wallet || []).reduce((s, w) => s + w.amt, 0))} taken out, ${brl((state.wallet || []).reduce((s, w) => s + w.amt, 0) - walletLeft())} spent in cash` : ''}</div>
+      ${walletLeft() < 0 ? `<div class="muted" style="margin-top:4px">You've logged more cash spending than cash taken out. Add your ATM withdrawals below.</div>` : ''}
+      ${(state.wallet || []).map(w => `<div class="exp">${ic('price')}<div class="grow">${esc(w.note || 'ATM withdrawal')}<div class="muted">${shortDate(w.date)}</div></div>
+        <div class="expamt"><b>${w.amt < 0 ? '−' + brl(-w.amt) : '+' + brl(w.amt)}</b><span class="muted">${cop(Math.abs(w.amt))}</span></div>
+        <button class="x" data-act="delCash" data-id="${w.id}" aria-label="Delete ${esc(w.note || 'ATM withdrawal')}">×</button></div>`).join('')}
+      <div class="grid2" style="margin-top:var(--s3)">
+        <label class="muted">Cash added (R$)<input id="cashAmt" type="number" inputmode="decimal" placeholder="200"></label>
+        <label class="muted">Note<input id="cashNote" placeholder="ATM at Paulista"></label>
+      </div>
+      <button class="ghost" style="margin-top:var(--s2)" data-act="addCash">Add cash</button>
+      <div class="muted" style="margin-top:var(--s1)">Expenses marked Cash come off this automatically. To correct the total after counting your notes, add a negative amount.</div>
     </div>
     <div class="card"><div class="row"><b class="grow">Day by day</b><span class="muted">tap a day to open it</span></div>
       <div class="hist">${days.map(d => {
@@ -3667,6 +3699,7 @@ function renderBudget() {
       <div class="muted">Spent ${brl(totalSpent)} of ${brl(trip)}</div>
       <div class="muted copline">COP ${money(totalSpent * state.rate)} of ${money(trip * state.rate)}</div>
       ${prepaidSum ? `<div class="muted copline">Prepaid ${brl(prepaidSum)} · day to day ${brl(totalSpent - prepaidSum)}</div>` : ''}
+      ${cardFee() > 0 && state.expenses.some(e => e.pay === 'card') ? `<div class="muted copline">Card fees so far ≈ ${copAmt(Math.round(state.expenses.filter(e => e.pay === 'card').reduce((s, e) => s + expCOP(e), 0) * cardFee() / 100))} (${cardFee()}%)</div>` : ''}
       <div class="${totalLeft<0?'neg':''}" style="margin-top:var(--s1)"><b>Left: ${brl(totalLeft)}</b> <span class="muted">${cop(totalLeft)}</span></div>
       ${perDay !== null ? `<div class="perday ${perDay < 0 ? 'neg' : ''}">${ic('cal')}<div><b>About ${brl(perDay)} a day</b> for the ${ahead.length} day${ahead.length === 1 ? '' : 's'} left${ahead.length < days.length ? ', today included' : ''}
         <div class="muted">${cop(perDay)} a day</div></div></div>` : '<div class="muted" style="margin-top:var(--s2)">The trip is over.</div>'}
@@ -3697,6 +3730,8 @@ function renderBudget() {
         <label class="muted">Default daily budget (R$)<input id="setDaily" type="number" inputmode="decimal" min="0" value="${state.daily}" data-act="setDaily"></label>
         <label class="muted">COP per 1 R$<input id="setRate" type="number" inputmode="decimal" value="${state.rate}" data-act="setRate"></label>
       </div>
+      <label class="muted" style="display:block;margin-top:var(--s2)">Card fee (%)<input id="setFee" type="number" inputmode="decimal" min="0" max="20" step="0.1" value="${state.cardFee || 0}" data-act="setCardFee"></label>
+      <div class="muted" style="margin:2px 0 var(--s2)">What your bank adds on foreign card purchases (check your card's terms). Card expenses then show their real cost in COP.</div>
       <label class="check carryset"><input type="checkbox" ${state.carry ? 'checked' : ''} data-act="toggleCarry">
         <span><b>Carry leftovers to the next day</b><span class="muted">When a day ends, money you didn't spend is added to the next day, and overspending is taken off it.</span></span></label>
       <p class="muted">The default applies to every day without its own budget. Tap "Update" at the top of Budget for today's rate, or type your own (for example your bank's rate).
@@ -4255,7 +4290,7 @@ const actions = {
     const isCOP = state.lastCur === 'COP', note = document.getElementById('expNote').value.trim(), cat = ui.expCat || 'other';
     const sd = spreadDays(), parts = splitAmount(v, sd.length, !isCOP), group = sd.length > 1 ? uid() : undefined;
     const added = sd.map((date, i) => {
-      const e = {id: uid(), date, note, cat};
+      const e = {id: uid(), date, note, cat, pay: state.lastPay || 'card'};
       if (isCOP) Object.assign(e, {cur: 'COP', cop: parts[i]}); else e.amt = parts[i];
       if (group) Object.assign(e, {group, part: i + 1, parts: sd.length});
       return e;
@@ -4308,6 +4343,16 @@ const actions = {
   },
   budgetDay: t => { ui.expDate = t.dataset.v; },
   histDay: t => { ui.expDate = t.dataset.v; setTimeout(() => window.scrollTo({top: 0, behavior: 'smooth'}), 0); },
+  setPay: t => {   // in place, so a half-typed amount stays; remembered for next time
+    state.lastPay = t.dataset.v; save();
+    t.parentElement.querySelectorAll('button').forEach(b => { const on = b === t; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
+    return false;
+  },
+  addCash: () => {
+    const v = parseFloat(document.getElementById('cashAmt').value); if (!v) return false;
+    (state.wallet ||= []).push({id: uid(), date: brazilToday(), amt: v, note: document.getElementById('cashNote').value.trim()});
+  },
+  delCash: t => { state.wallet = (state.wallet || []).filter(w => w.id !== t.dataset.id); },
   toggleCarry: () => { state.carry = !state.carry; },
   getRate: () => { if (!ui.rateBusy) fetchRate(); return false; },
   resetDayBudget: t => { if (state.dayBudgets) delete state.dayBudgets[t.dataset.v]; },
@@ -4350,6 +4395,7 @@ document.getElementById('main').addEventListener('change', e => {
   if (a === 'setConf') { state.docs.find(d => d.id === t.dataset.id).conf = t.value.trim(); save(); }
   else if (a === 'setDaily') { state.daily = parseFloat(t.value) || 0; save(); render(); }
   else if (a === 'setRate') { const v = parseFloat(t.value); if (v > 0) { state.rate = v; state.rateInfo = {source: 'manual', date: brazilToday()}; ui.rateMsg = ''; } save(); render(); }
+  else if (a === 'setCardFee') { const v = parseFloat(t.value); state.cardFee = v > 0 ? Math.min(20, v) : 0; save(); render(); }
   else if (a === 'setTrip') { const v = parseFloat(t.value); if (v >= 0) state.tripBudget = v; else delete state.tripBudget; save(); render(); }
   else if (a === 'setDayBudget') { const v = parseFloat(t.value); state.dayBudgets = state.dayBudgets || {};
     if (v >= 0) state.dayBudgets[t.dataset.v] = v; else delete state.dayBudgets[t.dataset.v]; save(); render(); }
