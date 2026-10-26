@@ -3405,7 +3405,41 @@ function renderListView(m) {
 }
 /* ---- Route map for a day (Plan tab) ---- */
 let leafMap = null, mapLayer = null;
-function coordsLoad() { try { return JSON.parse(localStorage.getItem('trip-coords-v1')) || {}; } catch (e) { return {}; } }
+// Checked map pins for the built-in places [lat, lng], so they never need a live search.
+// From OpenStreetMap/Nominatim, Oct 2026, each compared with the place's address. Hand-picked spots:
+// pinacoteca and rua25 (search found same-named places in other towns), sesc (venue, not the metro station),
+// liberdade (the square), pao (cable car station), cristo (Cosme Velho train station), jbrj (the garden),
+// paulista (Trianon, by MASP), and luz, bauxoaugusta (Cine Joia), lapa, mar, cariocagema, pedradosal,
+// praias (Copacabana), santateresa (Largo dos Guimarães), which the search could not find.
+// futebolmatch has no pin: the stadium depends on the match.
+const PINS = {
+  masp:[-23.56150,-46.65597], ims:[-23.55607,-46.66193], japanhouse:[-23.57066,-46.64461],
+  ibirapuera:[-23.58771,-46.65852], beco:[-23.55688,-46.68614], porsol:[-23.55333,-46.70349],
+  mercado:[-23.54173,-46.62952], liberdade:[-23.55507,-46.63565], terraco:[-23.54544,-46.64356],
+  farol:[-23.54578,-46.63410], pinacoteca:[-23.53427,-46.63392], mlp:[-23.53497,-46.63510],
+  theatro:[-23.54528,-46.63864], sesc:[-23.52581,-46.68350], futebol:[-23.54742,-46.66547],
+  paulista:[-23.56280,-46.65783], copan:[-23.54659,-46.64453], se:[-23.55127,-46.63437], saobento:[-23.54343,-46.63413],
+  luz:[-23.53290,-46.63498], salasp:[-23.53422,-46.63983], memorial:[-23.52754,-46.66544],
+  bandeiras:[-23.58005,-46.66069], independencia:[-23.58068,-46.60931], consolacao:[-23.55060,-46.65723],
+  estaiada:[-23.60870,-46.69984], bixiga:[-23.55771,-46.64681], calixto:[-23.55833,-46.68074],
+  casarosas:[-23.57110,-46.64517], itaucultural:[-23.57045,-46.64603], ccbb:[-23.54756,-46.63469],
+  rua25:[-23.54127,-46.63214], casafrancisca:[-23.54883,-46.63479], oborogodo:[-23.56020,-46.68622],
+  bauxoaugusta:[-23.55331,-46.63592], villalobos:[-23.54628,-46.72373], jbsp:[-23.64150,-46.62566],
+  jaragua:[-23.45843,-46.76703], paranapiacaba:[-23.77785,-46.30129], embu:[-23.64953,-46.85285],
+  santos:[-23.96094,-46.31663], cristo:[-22.94061,-43.19853], pao:[-22.95581,-43.16700], arpoador:[-22.99039,-43.19041],
+  selaron:[-22.91544,-43.17945], lapa:[-22.91303,-43.17996], amanha:[-22.89407,-43.17940], mar:[-22.89645,-43.18184],
+  jbrj:[-22.96786,-43.22512], lage:[-22.95941,-43.21189], cariocagema:[-22.91328,-43.18191],
+  hippie:[-22.98543,-43.19844], santateresa:[-22.92170,-43.18605], gabinete:[-22.90537,-43.18221],
+  saobentorio:[-22.89791,-43.17980], pedradosal:[-22.89804,-43.18541], praias:[-22.97570,-43.18662],
+  maracana:[-22.91216,-43.23119], urca:[-22.95300,-43.15838]
+};
+const NO_PIN = new Set(['futebolmatch']);   // don't search for these
+// Saved pins (from searches for places you add yourself), with the checked built-in pins on top
+function coordsLoad() {
+  let c = {}; try { c = JSON.parse(localStorage.getItem('trip-coords-v1')) || {}; } catch (e) {}
+  for (const [id, p] of Object.entries(PINS)) c[id] = {lat: p[0], lng: p[1]};
+  return c;
+}
 function coordsSave(c) { try { localStorage.setItem('trip-coords-v1', JSON.stringify(c)); } catch (e) {} }
 function placeQuery(a) { return a.name + ', ' + a.city + ', Brazil'; }
 function gmapsDir(origin, dest, mode, waypoints) {
@@ -3424,6 +3458,14 @@ function distKm(p, q) {
 const WALK_MAX_MIN = 25;   // walks up to this many minutes are drawn in the app; longer legs suggest the metro
 function routesLoad() { try { return JSON.parse(localStorage.getItem('trip-routes-v1')) || {}; } catch (e) { return {}; } }
 function routesSave(r) { try { localStorage.setItem('trip-routes-v1', JSON.stringify(r)); } catch (e) {} }
+// One-time cleanup: walking routes saved before PINS existed may start or end at a wrong pin
+(function () { try {
+  if (localStorage.getItem('trip-pins-v') === '1') return;
+  const old = JSON.parse(localStorage.getItem('trip-coords-v1')) || {}, rt = routesLoad();
+  const moved = id => PINS[id] && old[id] && distKm(old[id], {lat: PINS[id][0], lng: PINS[id][1]}) > 0.05;
+  for (const k of Object.keys(rt)) if (k.split('|').some(moved)) delete rt[k];
+  routesSave(rt); localStorage.setItem('trip-pins-v', '1');
+} catch (e) {} })();
 function legData(A, B, co, rt) {
   const ca = co[A.a.id], cb = co[B.a.id];
   if (!ca || !cb) return {kind: 'unknown'};
@@ -3509,7 +3551,7 @@ async function initMap() {
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19, attribution: '© OpenStreetMap'}).addTo(map);
   drawMap(map);
   const status = document.getElementById('mapStatus'), co = coordsLoad();
-  const missing = dayStops().filter(s => !co[s.a.id]);
+  const missing = dayStops().filter(s => !co[s.a.id] && !NO_PIN.has(s.a.id));
   for (let i = 0; i < missing.length; i++) {
     if (leafMap !== map) return;
     if (status) status.textContent = `Locating places… ${i + 1}/${missing.length}`;
