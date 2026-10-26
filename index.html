@@ -28,6 +28,8 @@
     }
   }
   * { box-sizing:border-box; }
+  /* the app redraws the page on every tap; the browser's scroll anchoring then guessed wrong and moved the page */
+  html, body, main { overflow-anchor:none; }
   body { margin:0; font:16px/1.45 'Plus Jakarta Sans',system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--ink); }
   button, input, select, textarea { font-family:inherit; }
   header { padding:var(--s4) var(--s4) var(--s2); padding-top:calc(var(--s4) + env(safe-area-inset-top)); }
@@ -883,6 +885,17 @@
   .holidays > div > b:first-child { display:block; font-size:15px; margin-bottom:2px; }
   .holidays .muted { font-size:13px; margin-top:2px; }
   @media (prefers-color-scheme: dark) { .daymap .leaflet-tile-pane { filter:brightness(.82) contrast(1.05); } }
+  /* Plan items: time row and the time picker sheet */
+  .timebtn { display:flex; align-items:center; gap:var(--s3); width:100%; min-height:52px; margin-top:var(--s3); padding:var(--s2) var(--s3); border:1px solid var(--line); border-radius:12px; background:var(--bg); color:var(--ink); font:inherit; text-align:left; }
+  .timebtn .ri { margin:0; }
+  .timebtn .edit { color:var(--accent); font-size:14px; font-weight:700; }
+  .tnow { margin:var(--s1) 0 var(--s2); }
+  .tlabel { font-size:13px; color:var(--muted); margin:var(--s2) 0 4px; }
+  .tgrid { display:grid; grid-template-columns:repeat(6,1fr); gap:6px; }
+  .tgrid.mins { grid-template-columns:repeat(4,1fr); }
+  .tgrid.lens { grid-template-columns:repeat(3,1fr); }
+  .tgrid button { min-height:var(--tap); border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--ink); font:inherit; font-size:15px; font-weight:700; padding:0; }
+  .tgrid button.on { background:var(--accent); color:var(--on-accent); border-color:var(--accent); }
   .btn.wide { width:100%; margin-top:var(--s3); gap:var(--s2); }
   .btn.wide .ri { stroke:currentColor; margin:0; }
   
@@ -3449,7 +3462,6 @@ function autoArrange(iso) {
 }
 function itemCard(r) {
   const it = r.it, a = r.a;
-  const durs = [30, 45, 60, 90, 120, 150, 180, 240, 360, 480].map(d => `<option value="${d}" ${d === r.dur ? 'selected' : ''}>${d >= 60 ? (d / 60) + ' h' : d + ' min'}</option>`).join('');
   const st = r.status, docOpts = state.docs.map(d => `<option value="${d.id}" ${it.docId === d.id ? 'selected' : ''}>${esc(d.title)}</option>`).join('');
   const seg = [['idea', 'Idea'], ['booked', 'Booked'], ['cancelled', 'Cancelled']].map(([v, l]) =>
     `<button class="${st === v ? 'on ' + v : ''}" aria-pressed="${st === v}" data-act="setStatus" data-id="${it.id}" data-v="${v}">${l}</button>`).join('');
@@ -3458,14 +3470,12 @@ function itemCard(r) {
       <input type="checkbox" ${it.done ? 'checked' : ''} data-act="toggleDone" data-id="${it.id}" aria-label="Done: ${esc(r.name)}">
       <div class="grow t"><b>${esc(r.name)}</b>${a ? `<div class="muted">${esc(a.city)}${a.hoursShort ? ' · ' + esc(a.hoursShort) : ''}</div>` : ''}</div>
       <button class="x" data-act="delPlan" data-id="${it.id}" aria-label="Remove ${esc(r.name)} from this day">×</button></div>
+    <button class="timebtn" data-act="openTime" data-id="${it.id}" aria-label="Change time for ${esc(r.name)}">${ic('clock')}
+      <span class="grow">${r.start !== null ? `<b>${fmtMin(r.start)} – ${fmtMin(r.end % 1440)}</b>` : '<b>No time yet</b>'}<span class="muted"> · ${fmtDur(r.dur)}</span></span>
+      <span class="edit">${r.start !== null ? 'Change' : 'Set time'}</span></button>
     <div class="seg" role="group" aria-label="Status">${seg}</div>
     <label class="muted docpick">Attach document<select data-act="setDoc" data-id="${it.id}"><option value="">None</option>${docOpts}</select></label>
     ${docChip(it)}
-    <div class="grid2" style="margin-top:8px">
-      <label class="muted">Starts<input type="time" value="${it.start || ''}" data-act="setStart" data-id="${it.id}"></label>
-      <label class="muted">Length<select data-act="setDur" data-id="${it.id}">${durs}</select></label>
-    </div>
-    ${it.start ? `<button class="ghost" style="margin-top:6px" data-act="clearStart" data-id="${it.id}">Remove time</button>` : ''}
     ${r.warns.map(w => `<div class="ag-warn">${ic('warn')}<span>${esc(w)}</span></div>`).join('')}
   </div>`;
 }
@@ -3485,6 +3495,30 @@ function renderDocSheet() {
       ${d.conf ? `<div class="row"><span class="conf grow">${esc(d.conf)}</span><button class="btn" data-act="copy" data-id="${d.id}">Copy</button></div>`
                : '<div class="muted">None saved yet. You can add it in Docs.</div>'}
       <button class="ghost" style="margin-top:var(--s3)" data-act="goDocs">Open in Docs</button>
+    </div>`;
+}
+// Bottom sheet for picking a plan item's start time and length with big buttons (no time wheel)
+const LENGTHS = [30, 45, 60, 90, 120, 180, 240, 360, 480];
+function renderTimeSheet() {
+  const it = ui.timeSheet && findPlanItem(ui.timeSheet); if (!it) return '';
+  const r = planModel(ui.planDay).rows.concat(planModel(ui.planDay).cancelled).find(x => x.it === it);
+  const [h, m] = it.start ? it.start.split(':').map(Number) : [null, null];
+  const hourBtn = x => `<button class="${x === h ? 'on' : ''}" aria-pressed="${x === h}" data-act="setHour" data-v="${x}">${String(x).padStart(2, '0')}</button>`;
+  const rows = [['Morning', 6], ['Afternoon', 12], ['Evening', 18]].map(([l, from]) =>
+    `<div class="tlabel">${l}</div><div class="tgrid">${[0, 1, 2, 3, 4, 5].map(k => hourBtn(from + k)).join('')}</div>`).join('');
+  const mins = [0, 15, 30, 45].map(x => `<button class="${x === m ? 'on' : ''}" aria-pressed="${x === m}" data-act="setMinute" data-v="${x}">:${String(x).padStart(2, '0')}</button>`).join('');
+  const lens = LENGTHS.map(x => `<button class="${x === r.dur ? 'on' : ''}" aria-pressed="${x === r.dur}" data-act="setLen" data-v="${x}">${fmtDur(x)}</button>`).join('');
+  return `<div class="backdrop" data-act="closeTime"></div>
+    <div class="sheet" role="dialog" aria-label="Time for ${esc(r.name)}"><div class="grab" aria-hidden="true"></div>
+      <div class="row"><b class="grow" style="font-size:18px">${esc(r.name)}</b><button class="x" data-act="closeTime" aria-label="Close">×</button></div>
+      <div class="tnow">${r.start !== null ? `<b>${fmtMin(r.start)} – ${fmtMin(r.end % 1440)}</b> · ${fmtDur(r.dur)}` : '<b>Pick an hour</b>, then the minutes'}</div>
+      ${r.warns.map(w => `<div class="ag-warn">${ic('warn')}<span>${esc(w)}</span></div>`).join('')}
+      <div class="ilabel" style="margin-top:var(--s3)">Starts at</div>${rows}
+      <div class="tlabel">Minutes</div><div class="tgrid mins">${mins}</div>
+      <div class="ilabel" style="margin-top:var(--s4)">Length</div><div class="tgrid lens">${lens}</div>
+      <div class="row" style="margin-top:var(--s4)">
+        ${it.start ? `<button class="ghost" data-act="clearTime">Remove time</button>` : ''}
+        <button class="btn grow" data-act="closeTime">Done</button></div>
     </div>`;
 }
 // Every plan item that has this document attached, by date
@@ -3819,9 +3853,11 @@ function render() {
   if (tab !== 'explore') { ui.sheet = false; ui.draft = null; }
   if (!(tab === 'explore' && ui.detail)) ui.daySheet = false;
   const fn = {explore:renderExplore, budget:renderBudget, plan:renderPlan, docs:renderDocs}[tab];
-  document.getElementById('main').innerHTML = fn() + (tab === 'plan' ? renderDocSheet() : '');
+  document.getElementById('main').innerHTML = fn() + (tab === 'plan' ? renderDocSheet() + renderTimeSheet() : '');
   if (tab === 'explore' && ui.detail) refreshPhotos();
-  if (tab === 'plan') { const c = document.querySelector('#daychips .chip.on'); if (c) c.scrollIntoView({inline:'center', block:'nearest'}); }
+  // centre the chosen day chip by scrolling the chip row sideways only (scrollIntoView also scrolled the page up)
+  if (tab === 'plan') { const c = document.querySelector('#daychips .chip.on'), row = document.getElementById('daychips');
+    if (c && row) row.scrollLeft = c.offsetLeft - row.offsetLeft - (row.clientWidth - c.offsetWidth) / 2; }
   if (tab === 'plan' && document.getElementById('map')) initMap(); else if (leafMap) { try { leafMap.remove(); } catch (e) {} leafMap = null; }
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   const days = tripDays();
@@ -3863,7 +3899,12 @@ const actions = {
   planView: t => { ui.planView = t.dataset.v; },
   toggleWork: () => { (state.workOverride ||= {})[ui.planDay] = !workOn(ui.planDay); },
   autoArrange: () => { const left = autoArrange(ui.planDay); if (left) alert(left + ' item(s) did not fit around your work block. Try a weekend day or set a time by hand.'); },
-  clearStart: t => { const i = findPlanItem(t.dataset.id); if (i) delete i.start; },
+  openTime: t => { ui.timeSheet = t.dataset.id; },
+  closeTime: () => { ui.timeSheet = null; },
+  setHour: t => { const i = findPlanItem(ui.timeSheet); if (!i) return false; const m = i.start ? i.start.split(':')[1] : '00'; i.start = String(t.dataset.v).padStart(2, '0') + ':' + m; },
+  setMinute: t => { const i = findPlanItem(ui.timeSheet); if (!i) return false; const h = i.start ? i.start.split(':')[0] : '18'; i.start = h + ':' + String(t.dataset.v).padStart(2, '0'); },
+  setLen: t => { const i = findPlanItem(ui.timeSheet); if (i) i.dur = +t.dataset.v; },
+  clearTime: () => { const i = findPlanItem(ui.timeSheet); if (i) delete i.start; },
   fetchOne: t => { const a = actById(t.dataset.id); t.textContent = 'Fetching…';
     fetchPlacePhotos(a).then(k => { t.textContent = k ? `Added ${k}` : 'Nothing found'; refreshPhotos(); }).catch(() => { t.textContent = 'No internet'; }); return false; },
   fetchAll: t => { fetchAllPhotos(t); return false; },
@@ -3955,8 +3996,6 @@ document.getElementById('main').addEventListener('change', e => {
   else if (a === 'expDate') { ui.expDate = t.value; render(); }
   else if (a === 'setNote') { state.notes[t.dataset.id] = t.value; save(); }
   else if (a === 'importPhotos') { importPhotos(t.files[0]); t.value = ''; }
-  else if (a === 'setStart') { const i = findPlanItem(t.dataset.id); if (i) { if (t.value) i.start = t.value; else delete i.start; } save(); render(); }
-  else if (a === 'setDur') { const i = findPlanItem(t.dataset.id); if (i) i.dur = +t.value; save(); render(); }
   else if (a === 'setDoc') { const i = findPlanItem(t.dataset.id); if (i) { if (t.value) i.docId = t.value; else delete i.docId; } save(); render(); }
   else if (a === 'setWorkS' || a === 'setWorkE') { state.work = Object.assign({s:'10:00', e:'18:00'}, state.work); state.work[a === 'setWorkS' ? 's' : 'e'] = t.value || state.work[a === 'setWorkS' ? 's' : 'e']; save(); render(); }
   else if (a === 'addPhotos') { addPhotos(Array.from(t.files)); t.value = ''; }
