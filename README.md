@@ -3,6 +3,9 @@
 A small app for a solo trip to **São Paulo and Rio de Janeiro, 14–24 November 2026**.
 It is made for a phone, and once it has been opened one time it keeps working with no internet.
 
+**Live app:** <https://davidmubel-gif.github.io/brazil-trip-app/>
+(hosted free on GitHub Pages from this project's `main` branch).
+
 It is a "web app" (a PWA, Progressive Web App): a web page that a phone can install
 on its home screen like a normal app. There is no app store, no account and no server-side database.
 
@@ -58,9 +61,24 @@ features won't work.)
 
 ## Releasing a new version (important)
 
-Every time any file changes, edit the `CACHE` line near the top of `sw.js` and raise the number
-(for example `'trip-v15'` to `'trip-v16'`). That is how phones know a new version exists.
-Without it, a phone can keep showing the old version.
+1. Every time an app file changes, edit the `CACHE` line near the top of `sw.js` and raise the number
+   (for example `'trip-v15'` to `'trip-v16'`). That is how phones know a new version exists.
+   Without it, a phone can keep showing the old version.
+2. Save a version in Git (a "commit"), then send it to GitHub:
+
+   ```
+   git push
+   ```
+
+   The live app updates within a couple of minutes. On the phone, the new version shows the
+   *second* time you open the app after that (the first opening downloads it in the background).
+
+## Before the trip: make the maps work offline
+
+Map pictures are saved only for areas you have actually looked at (OpenStreetMap does not allow
+downloading whole cities). So, on Wi-Fi before leaving, open each day's map in the Plan tab and
+zoom in around the places you will visit. Those areas then show with no signal.
+Photos work the same way: tap "Get photos for all places" once, on Wi-Fi.
 
 ## Version history
 
