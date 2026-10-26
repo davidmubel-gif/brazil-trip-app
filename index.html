@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#F4F7F5" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0E1614" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#F6F4EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0F1712" media="(prefers-color-scheme: dark)">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>Brazil Trip</title>
@@ -15,16 +15,20 @@
 
   /* Design tokens: change a colour or size here and the whole app follows */
   :root {
-    --bg:#F4F7F5; --card:#FFFFFF; --ink:#14231F; --muted:#4B5D57; --line:#D5E0DB; --soft:#E6EEEA;
-    --accent:#0B6B5E; --on-accent:#FFFFFF; --action:#C2410C; --on-action:#FFFFFF;
-    --ok-bg:#DDF0EA; --ok-ink:#0B6B5E; --warn:#92400E; --warn-bg:#FEF3C7; --star:#D97706;
+    /* Palette "Mata e ipê": Amazon green (navigation, walking), Brazil blue (one main button, metro),
+       ipê yellow (selected chips, always behind dark text), on warm sand */
+    --bg:#F6F4EC; --card:#FFFFFF; --ink:#142218; --muted:#4F5B50; --line:#DDE2D3; --soft:#ECEFE3;
+    --accent:#1B6D3F; --on-accent:#FFFFFF; --action:#002776; --on-action:#FFFFFF;
+    --hi:#FFCC29; --on-hi:#142218;
+    --ok-bg:#E2F0E5; --ok-ink:#1B6D3F; --warn:#92400E; --warn-bg:#FEF3C7; --star:#A67C00;
     --nav-h:calc(64px + env(safe-area-inset-bottom)); --radius:16px; --radius-sm:10px; --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --tap:44px;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg:#0E1614; --card:#17211F; --ink:#E8F0EC; --muted:#A3B5AD; --line:#2A3835; --soft:#212E2B;
-      --accent:#2DD4BF; --on-accent:#04201B; --action:#FB923C; --on-action:#2A1203;
-      --ok-bg:#16332E; --ok-ink:#5EEAD4; --warn:#FBBF24; --warn-bg:#33270B; --star:#FBBF24;
+      --bg:#0F1712; --card:#18221B; --ink:#E9F0E8; --muted:#A7B5A8; --line:#2B382E; --soft:#223026;
+      --accent:#5CC98A; --on-accent:#06210F; --action:#7FA2F5; --on-action:#071433;
+      --hi:#F2C230; --on-hi:#142218;
+      --ok-bg:#183A26; --ok-ink:#7FDCA3; --warn:#FBBF24; --warn-bg:#33270B; --star:#F2C230;
     }
   }
   * { box-sizing:border-box; }
@@ -50,7 +54,7 @@
   .muted { color:var(--muted); font-size:14px; }
   .chips { display:flex; gap:var(--s2); flex-wrap:wrap; margin:var(--s2) 0; }
   .chip { border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:999px; padding:var(--s2) 14px; min-height:var(--tap); font-size:14px; font-weight:600; }
-  .chip.on { background:var(--accent); color:var(--on-accent); border-color:var(--accent); font-weight:700; }
+  .chip.on { background:var(--hi); color:var(--on-hi); border-color:var(--hi); font-weight:700; }
   .star { border:0; background:none; font-size:26px; color:var(--muted); min-width:var(--tap); min-height:var(--tap); padding:var(--s1); }
   .star.on { color:var(--star); }
   input, select { font:inherit; padding:var(--s3); min-height:var(--tap); border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--bg); color:var(--ink); width:100%; }
@@ -101,9 +105,9 @@
   .herowrap { position:relative; margin:0 calc(-1 * var(--s4)); }
   .herowrap .hero { height:240px; border-radius:0 0 20px 20px; color:var(--accent); }
   .hero .cat-ic { width:72px; height:72px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
-  .fab { position:absolute; top:calc(12px + env(safe-area-inset-top)); width:44px; height:44px; border-radius:50%; border:0; background:rgba(255,255,255,.92); color:#14231F; display:flex; align-items:center; justify-content:center; box-shadow:0 1px 6px rgba(0,0,0,.25); padding:0; }
-  .fab.left { left:var(--s4); } .fab.right { right:var(--s4); font-size:24px; min-width:44px; min-height:44px; margin:0; color:#14231F; }
-  .fab.right.on { color:#D97706; }
+  .fab { position:absolute; top:calc(12px + env(safe-area-inset-top)); width:44px; height:44px; border-radius:50%; border:0; background:rgba(255,255,255,.92); color:#142218; display:flex; align-items:center; justify-content:center; box-shadow:0 1px 6px rgba(0,0,0,.25); padding:0; }
+  .fab.left { left:var(--s4); } .fab.right { right:var(--s4); font-size:24px; min-width:44px; min-height:44px; margin:0; color:#142218; }
+  .fab.right.on { color:#A67C00; }
   .fi { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:2.4; stroke-linecap:round; stroke-linejoin:round; }
   .ri { width:22px; height:22px; flex:none; fill:none; stroke:var(--accent); stroke-width:2; stroke-linecap:round; stroke-linejoin:round; margin-top:2px; }
   .irow { display:flex; gap:var(--s3); align-items:flex-start; padding:var(--s3) 0; }
@@ -122,7 +126,7 @@
   .actionbar { position:fixed; left:0; right:0; bottom:var(--nav-h); z-index:40; background:var(--card); border-top:1px solid var(--line); padding:var(--s3) var(--s4); }
   .actionbar-in { display:flex; gap:var(--s2); max-width:640px; margin:0 auto; }
   .dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--action); margin-left:6px; vertical-align:middle; }
-  .chip.on .dot { background:var(--on-accent); }
+  .chip.on .dot { background:var(--on-hi); }
   .ag { display:flex; flex-direction:column; margin:var(--s2) 0; }
   .ag-row { display:flex; gap:var(--s3); }
   .ag-t { width:44px; flex:none; font-size:12px; font-weight:700; color:var(--muted); padding-top:14px; }
@@ -3709,7 +3713,7 @@ function drawMap(map) {
   if (mapLayer) mapLayer.remove(); mapLayer = L.layerGroup().addTo(map);
   const co = coordsLoad(), rt = routesLoad(), stops = dayStops(), pts = [];
   const css = getComputedStyle(document.documentElement);
-  const teal = css.getPropertyValue('--accent').trim() || '#0B6B5E', orange = css.getPropertyValue('--action').trim() || '#C2410C';
+  const teal = css.getPropertyValue('--accent').trim() || '#1B6D3F', orange = css.getPropertyValue('--action').trim() || '#002776';
   for (let i = 0; i < stops.length - 1; i++) {
     const A = stops[i], B = stops[i + 1], L2 = legData(A, B, co, rt), ca = co[A.a.id], cb = co[B.a.id];
     if (!ca || !cb) continue;
