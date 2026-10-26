@@ -2,13 +2,14 @@
 // First visit: it saves a copy of the app files. After that: it serves those saved copies,
 // so the app opens even with no internet. Bump CACHE ("v2", "v3"...) whenever you update the app.
 // Map tiles you have looked at are also kept (in TILES) so those map areas still show offline.
-const CACHE = 'trip-v19';
+const CACHE = 'trip-v20';
 const TILES = 'trip-tiles';
 const MAX_TILES = 3000;   // about 60 MB; the oldest tiles are dropped first
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)));
+  // cache: 'reload' skips the browser's own HTTP cache, so a new release never saves an old copy
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES.map(f => new Request(f, {cache: 'reload'})))));
   self.skipWaiting();
 });
 
@@ -30,6 +31,11 @@ self.addEventListener('fetch', e => {
       if (r.ok) { c.put(e.request, r.clone()).then(() => { if (++tilePuts % 50 === 0) trimTiles(c); }); }
       return r;
     }).catch(() => new Response('', {status: 504})))));
+    return;
+  }
+  // opening the app (also with ?something added to the address) always gets the saved app page
+  if (e.request.mode === 'navigate' && url.origin === location.origin) {
+    e.respondWith(caches.match(e.request, {ignoreSearch: true}).then(hit => hit || caches.match('./index.html')).then(hit => hit || fetch(e.request)));
     return;
   }
   e.respondWith(caches.match(e.request).then(hit => hit || fetch(e.request)));
