@@ -806,7 +806,7 @@
   .pin{width:28px;height:28px;border-radius:50%;background:var(--accent);color:var(--on-accent);font-size:13px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2px solid var(--card);box-shadow:0 1px 4px rgba(0,0,0,.35)}
   .leaflet-container{font:inherit}
   /* Plan: day route map on top, stops and legs in a sheet below */
-  .daymap { position:relative; height:300px; border-radius:var(--radius); overflow:hidden; border:1px solid var(--line); background:var(--soft); margin-top:var(--s2); }
+  .daymap { position:relative; isolation:isolate; z-index:0; height:300px; border-radius:var(--radius); overflow:hidden; border:1px solid var(--line); background:var(--soft); margin-top:var(--s2); }
   .daymap #map { position:absolute; inset:0; }
   .legend { position:absolute; z-index:500; top:10px; right:10px; display:flex; gap:12px; background:var(--card); color:var(--ink); border-radius:999px; padding:4px 12px; font-size:12px; font-weight:700; box-shadow:0 1px 4px rgba(0,0,0,.25); }
   .legend i { display:inline-block; width:18px; vertical-align:middle; margin-right:6px; border-top:3px solid var(--accent); }
@@ -830,6 +830,20 @@
   details.more[open] { flex-basis:100%; }
   details.more[open] summary .ri { transform:rotate(180deg); }
   details.more .row { flex-wrap:wrap; padding-bottom:var(--s2); }
+  /* Plan items: status switch, attached document */
+  .seg { display:flex; margin-top:var(--s3); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  .seg button { flex:1; min-height:var(--tap); border:0; border-left:1px solid var(--line); background:none; color:var(--muted); font:inherit; font-size:14px; font-weight:600; }
+  .seg button:first-child { border-left:0; }
+  .seg button.on { background:var(--soft); color:var(--ink); font-weight:800; }
+  .seg button.on.booked { background:var(--ok-bg); color:var(--ok-ink); }
+  .seg button.on.cancelled { background:var(--warn-bg); color:var(--warn); }
+  .card.cancelled > .row b { text-decoration:line-through; color:var(--muted); }
+  .card.cancelled .grid2 { opacity:.6; }
+  .docpick { display:block; margin-top:var(--s3); }
+  .docchip { display:inline-flex; align-items:center; gap:var(--s2); max-width:100%; min-height:var(--tap); margin-top:var(--s2); padding:0 var(--s3); border:1px solid var(--accent); border-radius:999px; background:var(--card); color:var(--accent); font:inherit; font-size:14px; font-weight:700; text-align:left; }
+  .docchip span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .docchip .ri { width:18px; height:18px; margin:0; }
+  .conf { font:700 18px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; letter-spacing:.04em; background:var(--soft); padding:10px 12px; border-radius:10px; user-select:all; overflow-wrap:anywhere; }
   .btn.wide { width:100%; margin-top:var(--s3); gap:var(--s2); }
   .btn.wide .ri { stroke:currentColor; margin:0; }
   
@@ -2890,7 +2904,7 @@ const DEFAULT_STATE = {
   saved: {},            // {placeId: true}
   notes: {},            // {placeId: 'my notes'}
   customActs: [],       // activities you add yourself
-  plan: {},             // {'2026-11-14': [{id, actId, text, done, booked}]}
+  plan: {},             // {'2026-11-14': [{id, actId, text, done, booked, status, docId}]}  status: idea | booked | cancelled
   expenses: [],         // [{id, date, amt, note}]
   docs: [
     {id:'d1', title:'Passport', conf:'', notes:'', checks:[{t:'Valid 6+ months after trip',d:false},{t:'Photo of passport page saved offline',d:false}]},
@@ -3333,14 +3347,19 @@ function fmtMin(n) { n = Math.max(0, Math.min(1439, n)); return String(Math.floo
 function isWeekend(iso) { const d = new Date(iso + 'T12:00:00').getDay(); return d === 0 || d === 6; }
 function workOn(iso) { const o = (state.workOverride || {})[iso]; return o === undefined ? !isWeekend(iso) : o; }
 function workTimes() { const w = state.work || {}; return [toMin(w.s || '10:00'), toMin(w.e || '18:00')]; }
+// Older items only had "booked" (true/false); status adds "cancelled"
+const itemStatus = it => it.status || (it.booked ? 'booked' : 'idea');
+const itemName = it => { const a = it.actId ? actById(it.actId) : null; return a ? a.name : (it.text || '(removed place)'); };
 function planModel(iso) {
   const [ws, we] = workTimes(), wOn = workOn(iso);
-  const rows = (state.plan[iso] || []).map(it => {
+  const all = (state.plan[iso] || []).map(it => {
     const a = it.actId ? actById(it.actId) : null;
     const start = toMin(it.start);
     const dur = it.dur || (a && DUR_BY_CAT[a.cat]) || (a ? 90 : 60);
-    return {it, a, name: a ? a.name : (it.text || '(removed place)'), start, dur, end: start === null ? null : start + dur, warns: []};
+    return {it, a, name: itemName(it), status: itemStatus(it), start, dur, end: start === null ? null : start + dur, warns: []};
   });
+  // cancelled items stay in the list but leave the timeline, the route and the warnings
+  const rows = all.filter(r => r.status !== 'cancelled');
   const sched = rows.filter(r => r.start !== null).sort((x, y) => x.start - y.start);
   sched.forEach(r => {
     if (wOn && r.start < we && r.end > ws) r.warns.push('Overlaps your work block');
@@ -3350,7 +3369,7 @@ function planModel(iso) {
       if (r.start >= 18 * 60 && r.a.eve === false) r.warns.push('May be closed in the evening');
     }
   });
-  return {rows, sched, unsched: rows.filter(r => r.start === null), ws, we, wOn};
+  return {rows, sched, unsched: rows.filter(r => r.start === null), cancelled: all.filter(r => r.status === 'cancelled'), ws, we, wOn};
 }
 function autoArrange(iso) {
   const m = planModel(iso);
@@ -3376,12 +3395,17 @@ function autoArrange(iso) {
 function itemCard(r) {
   const it = r.it, a = r.a;
   const durs = [30, 45, 60, 90, 120, 150, 180, 240, 360, 480].map(d => `<option value="${d}" ${d === r.dur ? 'selected' : ''}>${d >= 60 ? (d / 60) + ' h' : d + ' min'}</option>`).join('');
-  return `<div class="card ${it.done ? 'done' : ''}">
+  const st = r.status, docOpts = state.docs.map(d => `<option value="${d.id}" ${it.docId === d.id ? 'selected' : ''}>${esc(d.title)}</option>`).join('');
+  const seg = [['idea', 'Idea'], ['booked', 'Booked'], ['cancelled', 'Cancelled']].map(([v, l]) =>
+    `<button class="${st === v ? 'on ' + v : ''}" aria-pressed="${st === v}" data-act="setStatus" data-id="${it.id}" data-v="${v}">${l}</button>`).join('');
+  return `<div class="card ${it.done ? 'done' : ''} ${st === 'cancelled' ? 'cancelled' : ''}">
     <div class="row">
-      <input type="checkbox" ${it.done ? 'checked' : ''} data-act="toggleDone" data-id="${it.id}">
+      <input type="checkbox" ${it.done ? 'checked' : ''} data-act="toggleDone" data-id="${it.id}" aria-label="Done: ${esc(r.name)}">
       <div class="grow t"><b>${esc(r.name)}</b>${a ? `<div class="muted">${esc(a.city)}${a.hoursShort ? ' · ' + esc(a.hoursShort) : ''}</div>` : ''}</div>
-      <button class="ghost ${it.booked ? 'booked' : ''}" data-act="toggleBooked" data-id="${it.id}">${it.booked ? 'Booked ✓' : 'Not booked'}</button>
-      <button class="x" data-act="delPlan" data-id="${it.id}">×</button></div>
+      <button class="x" data-act="delPlan" data-id="${it.id}" aria-label="Remove ${esc(r.name)} from this day">×</button></div>
+    <div class="seg" role="group" aria-label="Status">${seg}</div>
+    <label class="muted docpick">Attach document<select data-act="setDoc" data-id="${it.id}"><option value="">None</option>${docOpts}</select></label>
+    ${docChip(it)}
     <div class="grid2" style="margin-top:8px">
       <label class="muted">Starts<input type="time" value="${it.start || ''}" data-act="setStart" data-id="${it.id}"></label>
       <label class="muted">Length<select data-act="setDur" data-id="${it.id}">${durs}</select></label>
@@ -3389,6 +3413,30 @@ function itemCard(r) {
     ${it.start ? `<button class="ghost" style="margin-top:6px" data-act="clearStart" data-id="${it.id}">Remove time</button>` : ''}
     ${r.warns.map(w => `<div class="warn" style="margin-top:6px;padding:6px 8px;border-radius:8px">⚠️ ${esc(w)}</div>`).join('')}
   </div>`;
+}
+// A plan item's attached document, as a chip that opens it
+function docChip(it) {
+  const d = it.docId && state.docs.find(x => x.id === it.docId); if (!d) return '';
+  return `<button class="docchip" data-act="openDoc" data-id="${d.id}" aria-label="Open document: ${esc(d.title)}">${ic('note')}<span>${esc(d.title)}${d.conf ? ' · ' + esc(d.conf) : ''}</span></button>`;
+}
+// Bottom sheet showing one document and its copyable confirmation number
+function renderDocSheet() {
+  const d = ui.docSheet && state.docs.find(x => x.id === ui.docSheet); if (!d) return '';
+  return `<div class="backdrop" data-act="closeDocSheet"></div>
+    <div class="sheet" role="dialog" aria-label="${esc(d.title)}"><div class="grab" aria-hidden="true"></div>
+      <div class="row"><b class="grow" style="font-size:18px">${esc(d.title)}</b><button class="x" data-act="closeDocSheet" aria-label="Close">×</button></div>
+      ${d.notes ? `<div class="muted">${esc(d.notes)}</div>` : ''}
+      <div class="ilabel" style="margin-top:var(--s3)">Confirmation number</div>
+      ${d.conf ? `<div class="row"><span class="conf grow">${esc(d.conf)}</span><button class="btn" data-act="copy" data-id="${d.id}">Copy</button></div>`
+               : '<div class="muted">None saved yet. You can add it in Docs.</div>'}
+      <button class="ghost" style="margin-top:var(--s3)" data-act="goDocs">Open in Docs</button>
+    </div>`;
+}
+// Every plan item that has this document attached, by date
+function docUses(id) {
+  const out = [];
+  for (const [date, items] of Object.entries(state.plan)) for (const it of items) if (it.docId === id) out.push({date, it});
+  return out.sort((x, y) => x.date.localeCompare(y.date));
 }
 function fmtDur(min) { const h = Math.floor(min / 60), m = min % 60; return (h ? h + ' h' : '') + (h && m ? ' ' : '') + (m ? m + ' min' : ''); }
 function legLine(A, B) {
@@ -3411,12 +3459,13 @@ function renderTimeline(m) {
       html += `<div class="ag-row"><div class="ag-t">${fmtMin(x.t)}</div><div class="ag-c"><div class="ag-work"><b>Work</b><span>${fmtMin(m.ws)} to ${fmtMin(m.we)}</span></div></div></div>`;
     } else {
       const r = x.r, prevItem = prev && prev.r && !prev.work ? prev.r : null;
-      const tag = r.it.booked ? '<span class="tag okTag">Booked</span>' : '<span class="tag">Idea</span>';
+      const tag = r.status === 'booked' ? '<span class="tag okTag">Booked</span>' : '<span class="tag">Idea</span>';
       html += `<div class="ag-row"><div class="ag-t">${fmtMin(r.start)}</div><div class="ag-c">
         ${prevItem && r.a ? legLine(prevItem, r) : ''}
         <div class="ag-card ${r.warns.length ? 'bad' : ''} ${r.it.done ? 'done' : ''}">
           <div class="row"><b class="grow">${esc(r.name)}</b>${r.it.done ? '<span class="tag okTag">Done</span>' : tag}</div>
           <div class="muted">${fmtMin(r.start)} to ${fmtMin(r.end % 1440)} · ${fmtDur(r.dur)}${r.a && cardStation(r.a) ? ' · ' + esc(cardStation(r.a)) : ''}</div>
+          ${docChip(r.it)}
           ${r.warns.map(w => `<div class="ag-warn">${ic('warn')}<span>${esc(w)}</span></div>`).join('')}
         </div></div></div>`;
     }
@@ -3645,12 +3694,12 @@ function renderPlan() {
   const shortDay = d => new Date(d + 'T12:00:00').toLocaleDateString('en-US', {weekday:'short', day:'numeric'});
   const chips = days.map(d => `<button class="chip ${iso === d ? 'on' : ''}" data-act="planDay" data-v="${d}">${shortDay(d)}${(state.plan[d] || []).length ? '<span class="dot"></span>' : ''}</button>`).join('');
   const w = state.work || {s: '10:00', e: '18:00'};
-  const ordered = m.sched.concat(m.unsched);
+  const ordered = m.sched.concat(m.unsched, m.cancelled);
   const savedOpts = allActs().filter(a => state.saved[a.id]).map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('');
   return `<div class="chips nowrap" id="daychips">${chips}</div>
     <div class="row" style="padding:4px 0"><h2 class="grow" style="margin:6px 0">${dayLabel(iso)}</h2>
       <button class="ghost" data-act="toggleWork">${m.wOn ? 'Work day' : 'Day off'}</button></div>
-    <div class="muted" style="margin:-4px 2px 4px">${m.rows.length} stop${m.rows.length === 1 ? '' : 's'} · ${m.rows.filter(r => r.it.booked).length} booked${m.wOn ? ' · work ' + fmtMin(m.ws) + ' to ' + fmtMin(m.we) : ''}</div>
+    <div class="muted" style="margin:-4px 2px 4px">${m.rows.length} stop${m.rows.length === 1 ? '' : 's'} · ${m.rows.filter(r => r.status === 'booked').length} booked${m.wOn ? ' · work ' + fmtMin(m.ws) + ' to ' + fmtMin(m.we) : ''}</div>
     ${renderDayMap()}
     ${renderRouteSheet()}
     <div class="chips">
@@ -3675,10 +3724,13 @@ function renderPlan() {
 }
 
 function renderDocs() {
+  const usedIn = d => { const u = docUses(d.id); return u.length ? `<div class="ilabel" style="margin-top:var(--s2)">Used in your plan</div>
+      <div class="chips">${u.map(x => `<button class="chip" data-act="goPlanDay" data-v="${x.date}">${dayLabel(x.date)} · ${esc(itemName(x.it))}</button>`).join('')}</div>` : ''; };
   const cards = state.docs.map(d => `
     <div class="card">
-      <div class="row"><b class="grow">${esc(d.title)}</b><button class="x" data-act="delDoc" data-id="${d.id}">×</button></div>
+      <div class="row"><b class="grow">${esc(d.title)}</b><button class="x" data-act="delDoc" data-id="${d.id}" aria-label="Delete ${esc(d.title)}">×</button></div>
       ${d.notes ? `<div class="muted">${esc(d.notes)}</div>` : ''}
+      ${usedIn(d)}
       <div class="row" style="margin:8px 0">
         <input placeholder="Confirmation number" value="${esc(d.conf)}" data-act="setConf" data-id="${d.id}">
         <button class="ghost" data-act="copy" data-id="${d.id}">Copy</button>
@@ -3694,7 +3746,7 @@ function render() {
   if (tab !== 'explore') { ui.sheet = false; ui.draft = null; }
   if (!(tab === 'explore' && ui.detail)) ui.daySheet = false;
   const fn = {explore:renderExplore, budget:renderBudget, plan:renderPlan, docs:renderDocs}[tab];
-  document.getElementById('main').innerHTML = fn();
+  document.getElementById('main').innerHTML = fn() + (tab === 'plan' ? renderDocSheet() : '');
   if (tab === 'explore' && ui.detail) refreshPhotos();
   if (tab === 'plan') { const c = document.querySelector('#daychips .chip.on'); if (c) c.scrollIntoView({inline:'center', block:'nearest'}); }
   if (tab === 'plan' && document.getElementById('map')) initMap(); else if (leafMap) { try { leafMap.remove(); } catch (e) {} leafMap = null; }
@@ -3794,7 +3846,11 @@ const actions = {
   addPlanSaved: () => { const v = document.getElementById('planPick').value; if (!v) return false; addPlan({actId:v}); },
   addPlanText: () => { const v = document.getElementById('planText').value.trim(); if (!v) return false; addPlan({text:v}); },
   toggleDone: t => { const i = findPlanItem(t.dataset.id); if (i) i.done = !i.done; },
-  toggleBooked: t => { const i = findPlanItem(t.dataset.id); if (i) i.booked = !i.booked; },
+  setStatus: t => { const i = findPlanItem(t.dataset.id); if (i) { i.status = t.dataset.v; i.booked = i.status === 'booked'; } },
+  openDoc: t => { ui.docSheet = t.dataset.id; },
+  closeDocSheet: () => { ui.docSheet = null; },
+  goDocs: () => { ui.docSheet = null; tab = 'docs'; window.scrollTo(0, 0); },
+  goPlanDay: t => { tab = 'plan'; ui.planDay = t.dataset.v; window.scrollTo(0, 0); },
   delPlan: t => { state.plan[ui.planDay] = (state.plan[ui.planDay]||[]).filter(i => i.id !== t.dataset.id); },
   toggleCheck: t => { const d = state.docs.find(x => x.id === t.dataset.id); d.checks[t.dataset.i].d = !d.checks[t.dataset.i].d; },
   addCheck: t => { const v = document.getElementById('chk-'+t.dataset.id).value.trim(); if (!v) return false; state.docs.find(x => x.id === t.dataset.id).checks.push({t:v, d:false}); },
@@ -3824,6 +3880,7 @@ document.getElementById('main').addEventListener('change', e => {
   else if (a === 'importPhotos') { importPhotos(t.files[0]); t.value = ''; }
   else if (a === 'setStart') { const i = findPlanItem(t.dataset.id); if (i) { if (t.value) i.start = t.value; else delete i.start; } save(); render(); }
   else if (a === 'setDur') { const i = findPlanItem(t.dataset.id); if (i) i.dur = +t.value; save(); render(); }
+  else if (a === 'setDoc') { const i = findPlanItem(t.dataset.id); if (i) { if (t.value) i.docId = t.value; else delete i.docId; } save(); render(); }
   else if (a === 'setWorkS' || a === 'setWorkE') { state.work = Object.assign({s:'10:00', e:'18:00'}, state.work); state.work[a === 'setWorkS' ? 's' : 'e'] = t.value || state.work[a === 'setWorkS' ? 's' : 'e']; save(); render(); }
   else if (a === 'addPhotos') { addPhotos(Array.from(t.files)); t.value = ''; }
 });
