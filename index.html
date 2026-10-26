@@ -844,6 +844,39 @@
   .docchip span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .docchip .ri { width:18px; height:18px; margin:0; }
   .conf { font:700 18px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; letter-spacing:.04em; background:var(--soft); padding:10px 12px; border-radius:10px; user-select:all; overflow-wrap:anywhere; }
+  /* Budget */
+  .bignum { font-size:40px; font-weight:800; letter-spacing:-.02em; line-height:1.15; margin:2px 0; }
+  .bar { height:10px; border-radius:999px; background:var(--soft); overflow:hidden; margin:var(--s3) 0 var(--s1); }
+  .bar i { display:block; height:100%; border-radius:999px; background:var(--accent); }
+  .bar.over i { background:var(--warn); }
+  .exp { display:flex; align-items:center; gap:var(--s3); padding:var(--s2) 0; border-top:1px solid var(--line); }
+  .exp:first-of-type { border-top:0; }
+  .exp > .ri { margin:0; }
+  .empty { display:flex; gap:var(--s3); align-items:flex-start; color:var(--muted); font-size:14px; padding:var(--s2) 0; }
+  .empty .ri { stroke:var(--muted); }
+  .big-empty { color:var(--ink); }
+  .big-empty .ri { stroke:var(--accent); }
+  details.card.settings { padding:0 var(--s4); }
+  details.card.settings summary { align-items:center; }
+  details.card.settings summary b { flex:none; }
+  details.card.settings summary .muted { flex:1; min-width:0; text-align:right; font-size:13px; }
+  details.card.settings summary .chev { margin-left:0; }
+  details.card.settings[open] { padding-bottom:var(--s3); }
+  /* Docs */
+  .doc-h { display:flex; align-items:center; gap:var(--s3); margin-bottom:var(--s3); }
+  .doc-h b { font-size:17px; }
+  .doc-ic { width:40px; height:40px; flex:none; border-radius:12px; background:var(--ok-bg); display:flex; align-items:center; justify-content:center; }
+  .doc-ic .ri { margin:0; }
+  .copyfield { display:flex; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--bg); overflow:hidden; }
+  .copyfield input { flex:1; min-width:0; width:auto; border:0; border-radius:0; background:none; font:700 16px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; letter-spacing:.03em; }
+  .copyfield input::placeholder { font:400 16px 'Plus Jakarta Sans',system-ui,sans-serif; letter-spacing:0; }
+  .copyfield button { flex:none; }
+  .copyfield button { display:flex; align-items:center; gap:6px; border:0; border-left:1px solid var(--line); background:var(--card); color:var(--accent); font:inherit; font-size:14px; font-weight:700; padding:0 var(--s3); min-width:var(--tap); }
+  .copyfield button .ri { margin:0; width:18px; height:18px; }
+  .checks { display:flex; flex-direction:column; }
+  .check { display:flex; align-items:center; gap:var(--s3); min-height:var(--tap); border-top:1px solid var(--line); font-size:15px; cursor:pointer; }
+  .check:first-child { border-top:0; }
+  .addrow { margin-top:var(--s2); }
   .btn.wide { width:100%; margin-top:var(--s3); gap:var(--s2); }
   .btn.wide .ri { stroke:currentColor; margin:0; }
   
@@ -3062,6 +3095,12 @@ const IC = {
   back:'<path d="M15 5l-7 7 7 7"/>',
   note:'<path d="M5 4h14v16H5zM9 9h6M9 13h6"/>',
   img:'<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="1.6"/><path d="M21 16l-5-5-8 8"/>',
+  plane:'<path d="M2 13l20-8-6 16-4-7z"/><path d="M12 14l4-4"/>',
+  home:'<path d="M4 11l8-7 8 7v9H4z"/><path d="M10 20v-5h4v5"/>',
+  bus:'<rect x="5" y="3" width="14" height="15" rx="3"/><path d="M5 11h14M8 18v2M16 18v2"/><circle cx="8.5" cy="14.5" r=".8"/><circle cx="15.5" cy="14.5" r=".8"/>',
+  idcard:'<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2"/><path d="M6 16c.8-1.5 5.2-1.5 6 0M14 10h4M14 13h4"/>',
+  receipt:'<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
+  copy:'<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 00-1-1H5a1 1 0 00-1 1v10a1 1 0 001 1h3"/>',
   walk:'<circle cx="13" cy="4.5" r="1.8"/><path d="M9 20l3-6-2-3 1-4 3 3 3 1M11 8l-3 3M12 14l3 3 1 4"/>',
   ext:'<path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/>'
 };
@@ -3299,7 +3338,7 @@ function spentOn(date) { return state.expenses.filter(e => e.date === date).redu
 
 function renderBudget() {
   const days = tripDays();
-  const todayIso = new Date(Date.now() - 5*3600*1000).toISOString().slice(0,10); // Bogotá date
+  const todayIso = new Date(Date.now() - 3*3600*1000).toISOString().slice(0,10); // Brazil date (UTC-3)
   const selDate = ui.expDate || (days.includes(todayIso) ? todayIso : days[0]);
   const spentDay = spentOn(selDate);
   const leftDay = state.daily - spentDay;
@@ -3307,36 +3346,45 @@ function renderBudget() {
   const totalSpent = state.expenses.reduce((s,e) => s + e.amt, 0);
   const totalLeft = totalAllow - totalSpent;
   const dayOpts = days.map(d => `<option value="${d}" ${d===selDate?'selected':''}>${dayLabel(d)}</option>`).join('');
+  // share of the allowance used, for the progress bars
+  const bar = (spent, of) => { const p = of > 0 ? Math.min(100, spent / of * 100) : 0;
+    return `<div class="bar ${spent > of ? 'over' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(p)}"><i style="width:${p}%"></i></div>`; };
   const log = state.expenses.filter(e => e.date === selDate).map(e => `
-    <div class="row" style="padding:6px 0;border-top:1px solid var(--line)">
+    <div class="exp">${ic('receipt')}
       <div class="grow">${esc(e.note||'Expense')}<div class="muted">≈ COP ${money(e.amt*state.rate)}</div></div>
-      <b>${brl(e.amt)}</b><button class="x" data-act="delExp" data-id="${e.id}">×</button></div>`).join('');
+      <b>${brl(e.amt)}</b><button class="x" data-act="delExp" data-id="${e.id}" aria-label="Delete expense ${esc(e.note || brl(e.amt))}">×</button></div>`).join('');
   return `
-    <div class="card">
-      <div class="muted">Left for ${dayLabel(selDate)}</div>
-      <div class="big ${leftDay<0?'neg':''}">${brl(leftDay)}</div>
-      <div class="muted">≈ COP ${money(leftDay*state.rate)} · allowance ${brl(state.daily)}</div>
+    <div class="card hero-b">
+      <div class="muted">${selDate === todayIso ? 'Left today' : 'Left for ' + dayLabel(selDate)}</div>
+      <div class="bignum ${leftDay<0?'neg':''}">${brl(leftDay)}</div>
+      <div class="muted">≈ COP ${money(leftDay*state.rate)}</div>
+      ${bar(spentDay, state.daily)}
+      <div class="muted">Spent ${brl(spentDay)} of ${brl(state.daily)}</div>
     </div>
     <div class="card"><b>Log an expense</b>
-      <div class="grid2" style="margin-top:8px">
-        <select id="expDate" data-act="expDate">${dayOpts}</select>
-        <input id="expAmt" type="number" inputmode="decimal" placeholder="Amount (R$)">
+      <div class="grid2" style="margin-top:var(--s2)">
+        <label class="muted">Day<select id="expDate" data-act="expDate">${dayOpts}</select></label>
+        <label class="muted">Amount (R$)<input id="expAmt" type="number" inputmode="decimal" placeholder="0,00"></label>
       </div>
-      <div class="row" style="margin-top:8px"><input id="expNote" placeholder="What for? (optional)"><button class="btn" data-act="addExp">Add</button></div>
-      <div style="margin-top:8px">${log || '<span class="muted">No expenses logged for this day.</span>'}</div>
+      <label class="muted" style="display:block;margin-top:var(--s2)">What for?<input id="expNote" placeholder="Optional, e.g. lunch"></label>
+      <button class="btn act wide" data-act="addExp">Add expense</button>
+    </div>
+    <div class="card"><div class="row"><b class="grow">Spent on ${dayLabel(selDate)}</b><span class="muted">${brl(spentDay)}</span></div>
+      ${log || `<div class="empty">${ic('receipt')}<span>Nothing logged for this day yet. Expenses you add appear here.</span></div>`}
     </div>
     <div class="card">
-      <div class="muted">Whole trip (${days.length} days)</div>
-      <div>Spent ${brl(totalSpent)} of ${brl(totalAllow)}</div>
-      <div class="${totalLeft<0?'neg':''}"><b>Left: ${brl(totalLeft)}</b> ≈ COP ${money(totalLeft*state.rate)}</div>
+      <div class="row"><b class="grow">Whole trip</b><span class="muted">${days.length} days</span></div>
+      ${bar(totalSpent, totalAllow)}
+      <div class="muted">Spent ${brl(totalSpent)} of ${brl(totalAllow)}</div>
+      <div class="${totalLeft<0?'neg':''}" style="margin-top:var(--s1)"><b>Left: ${brl(totalLeft)}</b> <span class="muted">≈ COP ${money(totalLeft*state.rate)}</span></div>
     </div>
-    <div class="card"><b>Settings</b>
-      <div class="grid2" style="margin-top:8px">
+    <details class="card dt settings"><summary><b>Settings</b><span class="muted">${brl(state.daily)} a day · ${money(state.rate)} COP per R$</span>${ic('chev', 'ri chev')}</summary>
+      <div class="grid2">
         <label class="muted">Daily allowance (R$)<input id="setDaily" type="number" inputmode="decimal" value="${state.daily}" data-act="setDaily"></label>
         <label class="muted">COP per 1 R$<input id="setRate" type="number" inputmode="decimal" value="${state.rate}" data-act="setRate"></label>
       </div>
       <p class="muted">Update the exchange rate to today's before you go (check Google or your bank).</p>
-    </div>`;
+    </details>`;
 }
 
 /* ---- Plan tab: daily schedule (timeline or list) ---- */
@@ -3726,20 +3774,34 @@ function renderPlan() {
 function renderDocs() {
   const usedIn = d => { const u = docUses(d.id); return u.length ? `<div class="ilabel" style="margin-top:var(--s2)">Used in your plan</div>
       <div class="chips">${u.map(x => `<button class="chip" data-act="goPlanDay" data-v="${x.date}">${dayLabel(x.date)} · ${esc(itemName(x.it))}</button>`).join('')}</div>` : ''; };
-  const cards = state.docs.map(d => `
-    <div class="card">
-      <div class="row"><b class="grow">${esc(d.title)}</b><button class="x" data-act="delDoc" data-id="${d.id}" aria-label="Delete ${esc(d.title)}">×</button></div>
-      ${d.notes ? `<div class="muted">${esc(d.notes)}</div>` : ''}
-      ${usedIn(d)}
-      <div class="row" style="margin:8px 0">
-        <input placeholder="Confirmation number" value="${esc(d.conf)}" data-act="setConf" data-id="${d.id}">
-        <button class="ghost" data-act="copy" data-id="${d.id}">Copy</button>
+  // an icon that fits the document's title
+  const docIcon = t => /flight|voo|plane|avi[aã]o/i.test(t) ? 'plane' : /airbnb|hotel|hostel|stay|apartment/i.test(t) ? 'home'
+    : /bus|[ôo]nibus|train|ticket/i.test(t) ? 'bus' : /passport|passaporte|\bid\b|visa/i.test(t) ? 'idcard' : 'note';
+  const cards = state.docs.map(d => {
+    const done = d.checks.filter(c => c.d).length;
+    return `<div class="card doc">
+      <div class="doc-h"><span class="doc-ic">${ic(docIcon(d.title))}</span>
+        <div class="grow"><b>${esc(d.title)}</b>${d.notes ? `<div class="muted">${esc(d.notes)}</div>` : ''}</div>
+        ${d.conf ? '<span class="tag okTag">Booked</span>' : ''}
+        <button class="x" data-act="delDoc" data-id="${d.id}" aria-label="Delete ${esc(d.title)}">×</button></div>
+      <label class="ilabel" for="conf-${d.id}">Confirmation number</label>
+      <div class="copyfield">
+        <input id="conf-${d.id}" placeholder="Add it here" value="${esc(d.conf)}" data-act="setConf" data-id="${d.id}" autocomplete="off" spellcheck="false">
+        <button data-act="copy" data-id="${d.id}" aria-label="Copy confirmation number for ${esc(d.title)}">${ic('copy')}<span>Copy</span></button>
       </div>
-      ${d.checks.map((c,i) => `<label class="row ${c.d?'done':''}" style="padding:4px 0"><input type="checkbox" ${c.d?'checked':''} data-act="toggleCheck" data-id="${d.id}" data-i="${i}"><span class="t">${esc(c.t)}</span></label>`).join('')}
-      <div class="row" style="margin-top:6px"><input placeholder="Add checklist item" id="chk-${d.id}"><button class="ghost" data-act="addCheck" data-id="${d.id}">Add</button></div>
-    </div>`).join('');
-  return cards + `<div class="card row"><input id="newDoc" placeholder="New document (e.g. Travel insurance)"><button class="btn" data-act="addDoc">Add</button></div>
-    <p class="muted">Tip: everything here is stored only on this phone. Don't type passport numbers if you'd rather not; confirmation codes are fine.</p>`;
+      ${usedIn(d)}
+      <div class="row" style="margin-top:var(--s3)"><b class="grow" style="font-size:14px">Checklist</b>${d.checks.length ? `<span class="muted">${done} of ${d.checks.length} done</span>` : ''}</div>
+      <div class="checks">${d.checks.map((c,i) => `<label class="check ${c.d?'done':''}"><input type="checkbox" ${c.d?'checked':''} data-act="toggleCheck" data-id="${d.id}" data-i="${i}"><span class="t">${esc(c.t)}</span></label>`).join('')
+        || '<div class="muted" style="padding:var(--s2) 0">No checklist yet. Add the things to sort out before you go.</div>'}</div>
+      <div class="row addrow"><input placeholder="Add a checklist item" id="chk-${d.id}" aria-label="New checklist item for ${esc(d.title)}"><button class="ghost" data-act="addCheck" data-id="${d.id}">Add</button></div>
+    </div>`;
+  }).join('');
+  const empty = `<div class="card empty big-empty">${ic('note')}<div><b>No documents yet</b>
+    <div class="muted">Add your flights, stays and bus tickets so their confirmation numbers are one tap away, even offline.</div></div></div>`;
+  return (cards || empty) + `<div class="card"><label class="muted" for="newDoc">New document</label>
+      <input id="newDoc" placeholder="e.g. Travel insurance">
+      <button class="btn act wide" data-act="addDoc">Add document</button></div>
+    <p class="muted">Everything here is stored only on this phone. Confirmation codes are fine; skip passport numbers if you'd rather not keep them here.</p>`;
 }
 
 function render() {
@@ -3857,8 +3919,12 @@ const actions = {
   addDoc: () => { const v = document.getElementById('newDoc').value.trim(); if (!v) return false; state.docs.push({id:uid(), title:v, conf:'', notes:'', checks:[]}); },
   delDoc: t => { if (confirm('Delete this document card?')) state.docs = state.docs.filter(d => d.id !== t.dataset.id); else return false; },
   copy: t => {
-    const d = state.docs.find(x => x.id === t.dataset.id); if (!d || !d.conf) return false;
-    (navigator.clipboard ? navigator.clipboard.writeText(d.conf) : Promise.reject()).then(() => { t.textContent = 'Copied ✓'; setTimeout(() => t.textContent = 'Copy', 1200); }).catch(() => {});
+    const d = state.docs.find(x => x.id === t.dataset.id); if (!d) return false;
+    const box = document.getElementById('conf-' + d.id); if (box) d.conf = box.value.trim();   // just typed, not saved yet
+    if (!d.conf) return false;
+    save();
+    const lbl = t.querySelector('span') || t;
+    (navigator.clipboard ? navigator.clipboard.writeText(d.conf) : Promise.reject()).then(() => { lbl.textContent = 'Copied'; setTimeout(() => lbl.textContent = 'Copy', 1200); }).catch(() => {});
     return false;
   },
 };
