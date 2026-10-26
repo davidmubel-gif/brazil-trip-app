@@ -20,6 +20,8 @@
     --bg:#F6F4EC; --card:#FFFFFF; --ink:#142218; --muted:#4F5B50; --line:#DDE2D3; --soft:#ECEFE3;
     --accent:#1B6D3F; --on-accent:#FFFFFF; --action:#002776; --on-action:#FFFFFF;
     --hi:#FFCC29; --on-hi:#142218;
+    /* spending categories (only used for small dots, bars and icons; text stays ink) */
+    --c-food:#1B6D3F; --c-transport:#002776; --c-activities:#C99700; --c-shopping:#B85B40; --c-nightlife:#6B3A7D; --c-other:#7C887E;
     --ok-bg:#E2F0E5; --ok-ink:#1B6D3F; --warn:#92400E; --warn-bg:#FEF3C7; --star:#A67C00;
     --nav-h:calc(64px + env(safe-area-inset-bottom)); --radius:16px; --radius-sm:10px; --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --tap:44px;
   }
@@ -28,6 +30,7 @@
       --bg:#0F1712; --card:#18221B; --ink:#E9F0E8; --muted:#A7B5A8; --line:#2B382E; --soft:#223026;
       --accent:#5CC98A; --on-accent:#06210F; --action:#7FA2F5; --on-action:#071433;
       --hi:#F2C230; --on-hi:#142218;
+      --c-food:#5CC98A; --c-transport:#7FA2F5; --c-activities:#F2C230; --c-shopping:#E08A6D; --c-nightlife:#C49AD6; --c-other:#8E9B90;
       --ok-bg:#183A26; --ok-ink:#7FDCA3; --warn:#FBBF24; --warn-bg:#33270B; --star:#F2C230;
     }
   }
@@ -870,6 +873,15 @@
   .rateline.stale { border-color:var(--warn); background:var(--warn-bg); }
   .rateline.stale .muted { color:var(--warn); }
   .rateline .ghost { flex:none; }
+  .catgrid { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:4px; }
+  .catgrid button { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; min-height:64px; border:1px solid var(--line); border-radius:12px; background:var(--card); color:var(--ink); font:inherit; font-size:13px; font-weight:600; padding:var(--s2) 4px; }
+  .catgrid button .ri { margin:0; width:24px; height:24px; }
+  .catgrid button.on { border:2px solid var(--accent); background:var(--ok-bg); font-weight:800; }
+  .stack { display:flex; height:14px; border-radius:999px; overflow:hidden; background:var(--soft); margin:var(--s1) 0 var(--s2); gap:2px; }
+  .stack i { display:block; height:100%; }
+  .catrow { display:flex; align-items:center; gap:var(--s3); padding:var(--s2) 0; border-top:1px solid var(--line); }
+  .catrow .ri { margin:0; }
+  .catrow > .muted { font-size:13px; }
   .curpick { margin-top:var(--s2); }
   .curpick .seg { margin-top:0; }
   .curpick #expConv { min-height:20px; margin-top:4px; }
@@ -3144,6 +3156,11 @@ const IC = {
   receipt:'<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
   copy:'<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 00-1-1H5a1 1 0 00-1 1v10a1 1 0 001 1h3"/>',
   cal:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+  fork:'<path d="M7 3v8a2 2 0 002 2v8M5 3v5a2 2 0 004 0V3M17 21V3c-2 1-3 4-3 7s1 3 3 3"/>',
+  ticket:'<path d="M3 8a2 2 0 002-2h14a2 2 0 002 2v2a2 2 0 000 4v2a2 2 0 00-2 2H5a2 2 0 00-2-2v-2a2 2 0 000-4z"/><path d="M14 7v2M14 11v2M14 15v2"/>',
+  bag:'<path d="M5 8h14l-1 13H6z"/><path d="M9 8V6a3 3 0 016 0v2"/>',
+  music:'<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
+  dots:'<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>',
   walk:'<circle cx="13" cy="4.5" r="1.8"/><path d="M9 20l3-6-2-3 1-4 3 3 3 1M11 8l-3 3M12 14l3 3 1 4"/>',
   ext:'<path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/>'
 };
@@ -3390,6 +3407,20 @@ const tripBudget = () => state.tripBudget !== undefined ? state.tripBudget : sta
 const brazilToday = () => new Date(Date.now() - 3*3600*1000).toISOString().slice(0,10); // Brazil date (UTC-3)
 const cop = v => '≈ COP ' + money(v * state.rate);
 const copAmt = v => 'COP ' + money(v);
+// Spending categories: [id, label, icon]; expenses logged before categories existed count as "other"
+const CATS = [['food', 'Food', 'fork'], ['transport', 'Transport', 'train'], ['activities', 'Activities', 'ticket'],
+  ['shopping', 'Shopping', 'bag'], ['nightlife', 'Nightlife', 'music'], ['other', 'Other', 'dots']];
+const catOf = e => CATS.find(c => c[0] === e.cat) || CATS[5];
+const catIc = c => `<svg class="ri" viewBox="0 0 24 24" aria-hidden="true" style="stroke:var(--c-${c[0]})">${IC[c[2]]}</svg>`;
+// "Where the money went": a stacked bar plus one row per category, biggest first
+function breakdown(list) {
+  const tot = list.reduce((s, e) => s + expBRL(e), 0);
+  if (!tot) return `<div class="empty">${ic('receipt')}<span>No spending logged here yet. Pick a category when you add an expense and it shows up here.</span></div>`;
+  const rows = CATS.map(c => ({c, v: list.filter(e => catOf(e) === c).reduce((s, e) => s + expBRL(e), 0)})).filter(r => r.v > 0).sort((a, b) => b.v - a.v);
+  return `<div class="stack" role="img" aria-label="${rows.map(r => `${r.c[1]} ${Math.round(r.v / tot * 100)}%`).join(', ')}">${rows.map(r => `<i style="width:${r.v / tot * 100}%;background:var(--c-${r.c[0]})"></i>`).join('')}</div>
+    ${rows.map(r => `<div class="catrow">${catIc(r.c)}<span class="grow">${r.c[1]}</span><span class="muted">${Math.round(r.v / tot * 100)}%</span>
+      <span class="expamt"><b>${brl(r.v)}</b><span class="muted">${cop(r.v)}</span></span></div>`).join('')}`;
+}
 // Today's BRL→COP rate: ExchangeRate-API's free open endpoint, with the free currency API on jsDelivr as a backup.
 // Offline, or if both fail, the last saved rate keeps working.
 const RATE_SOURCES = [
@@ -3453,8 +3484,8 @@ function renderBudget() {
   const bar = (spent, of) => { const p = of > 0 ? Math.min(100, spent / of * 100) : 0;
     return `<div class="bar ${spent > of ? 'over' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(p)}"><i style="width:${p}%"></i></div>`; };
   const log = state.expenses.filter(e => e.date === selDate).map(e => `
-    <div class="exp">${ic('receipt')}
-      <div class="grow">${esc(e.note||'Expense')}</div>
+    <div class="exp">${catIc(catOf(e))}
+      <div class="grow">${esc(e.note || catOf(e)[1])}${e.note ? `<div class="muted">${catOf(e)[1]}</div>` : ''}</div>
       <div class="expamt"><b>${e.cur === 'COP' ? copAmt(e.cop) : brl(e.amt)}</b>
         <div class="muted">${e.cur === 'COP' ? '≈ ' + brl(expBRL(e)) : cop(e.amt)}</div></div>
       <button class="x" data-act="delExp" data-id="${e.id}" aria-label="Delete expense ${esc(e.note || (e.cur === 'COP' ? copAmt(e.cop) : brl(e.amt)))}">×</button></div>`).join('');
@@ -3487,11 +3518,18 @@ function renderBudget() {
           <button class="${curCOP ? 'on' : ''}" aria-pressed="${curCOP}" data-act="setCur" data-v="COP">COP pesos</button></div>
         <div class="muted" id="expConv" aria-live="polite"></div>
       </div>
+      <div class="muted" style="margin-top:var(--s1)">Category</div>
+      <div class="catgrid" role="group" aria-label="Category">${CATS.map(c => `<button class="${ui.expCat === c[0] ? 'on' : ''}" aria-pressed="${ui.expCat === c[0]}" data-act="setCat" data-v="${c[0]}">${catIc(c)}<span>${c[1]}</span></button>`).join('')}</div>
       <label class="muted" style="display:block;margin-top:var(--s2)">What for?<input id="expNote" placeholder="Optional, e.g. lunch"></label>
       <button class="btn act wide" data-act="addExp">Add expense</button>
     </div>
     <div class="card"><div class="row"><b class="grow">Spent on ${dayLabel(selDate)}</b><span class="expamt"><b>${brl(spentDay)}</b><span class="muted">${cop(spentDay)}</span></span></div>
       ${log || `<div class="empty">${ic('receipt')}<span>Nothing logged for this day yet. Expenses you add appear here.</span></div>`}
+    </div>
+    <div class="card"><div class="row"><b class="grow">Where the money went</b></div>
+      <div class="chips"><button class="chip ${ui.split !== 'trip' ? 'on' : ''}" data-act="setSplit" data-v="day">${dayLabel(selDate)}</button>
+        <button class="chip ${ui.split === 'trip' ? 'on' : ''}" data-act="setSplit" data-v="trip">Whole trip</button></div>
+      ${breakdown(ui.split === 'trip' ? state.expenses : state.expenses.filter(e => e.date === selDate))}
     </div>
     <div class="card">
       <div class="row"><b class="grow">Whole trip</b><span class="muted">${days.length} days</span></div>
@@ -4067,8 +4105,16 @@ const actions = {
     const v = parseFloat(document.getElementById('expAmt').value); if (!(v > 0)) return false;
     const e = {id:uid(), date:document.getElementById('expDate').value, note:document.getElementById('expNote').value.trim()};
     if (state.lastCur === 'COP') Object.assign(e, {cur:'COP', cop:v}); else e.amt = v;
+    e.cat = ui.expCat || 'other'; ui.expCat = null;
     state.expenses.push(e);
   },
+  // pick a category in place (no redraw, so a half-typed amount stays)
+  setCat: t => {
+    ui.expCat = t.dataset.v;
+    t.parentElement.querySelectorAll('button').forEach(b => { const on = b === t; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
+    return false;
+  },
+  setSplit: t => { ui.split = t.dataset.v; },
   // switch the form's currency in place, so a half-typed amount isn't lost; remembered for next time
   setCur: t => {
     state.lastCur = t.dataset.v; save();
