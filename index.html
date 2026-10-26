@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0f766e">
+<meta name="theme-color" content="#F4F7F5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1614" media="(prefers-color-scheme: dark)">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>Brazil Trip</title>
@@ -46,7 +47,7 @@
   .grow { flex:1; min-width:0; }
   .muted { color:var(--muted); font-size:14px; }
   .chips { display:flex; gap:var(--s2); flex-wrap:wrap; margin:var(--s2) 0; }
-  .chip { border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:999px; padding:var(--s2) 14px; min-height:40px; font-size:14px; font-weight:600; }
+  .chip { border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:999px; padding:var(--s2) 14px; min-height:var(--tap); font-size:14px; font-weight:600; }
   .chip.on { background:var(--accent); color:var(--on-accent); border-color:var(--accent); font-weight:700; }
   .star { border:0; background:none; font-size:26px; color:var(--muted); min-width:var(--tap); min-height:var(--tap); padding:var(--s1); }
   .star.on { color:var(--star); }
@@ -93,7 +94,7 @@
   .pc-area { font-size:13px; }
   .pc-short { font-size:14px; line-height:1.4; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; margin-top:2px; }
   .pc-tags { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
-  .star.sm { min-width:36px; min-height:36px; font-size:22px; margin:-6px -6px 0 0; }
+  .star.sm { min-width:var(--tap); min-height:var(--tap); font-size:22px; margin:-10px -10px -4px 0; }
   .tag.warnTag { background:var(--warn-bg); color:var(--warn); }
   .herowrap { position:relative; margin:0 calc(-1 * var(--s4)); }
   .herowrap .hero { height:240px; border-radius:0 0 20px 20px; color:var(--accent); }
@@ -805,6 +806,7 @@
   
   .pin{width:28px;height:28px;border-radius:50%;background:var(--accent);color:var(--on-accent);font-size:13px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2px solid var(--card);box-shadow:0 1px 4px rgba(0,0,0,.35)}
   .leaflet-container{font:inherit}
+  .leaflet-touch .leaflet-bar a { width:44px; height:44px; line-height:44px; font-size:22px; }
   /* Plan: day route map on top, stops and legs in a sheet below */
   .daymap { position:relative; isolation:isolate; z-index:0; height:300px; border-radius:var(--radius); overflow:hidden; border:1px solid var(--line); background:var(--soft); margin-top:var(--s2); }
   .daymap #map { position:absolute; inset:0; }
@@ -877,6 +879,10 @@
   .check { display:flex; align-items:center; gap:var(--s3); min-height:var(--tap); border-top:1px solid var(--line); font-size:15px; cursor:pointer; }
   .check:first-child { border-top:0; }
   .addrow { margin-top:var(--s2); }
+  .holidays { display:flex; gap:var(--s3); align-items:flex-start; margin-top:0; padding:var(--s3) var(--s4); font-size:14px; background:var(--ok-bg); border-color:var(--ok-bg); }
+  .holidays > div > b:first-child { display:block; font-size:15px; margin-bottom:2px; }
+  .holidays .muted { font-size:13px; margin-top:2px; }
+  @media (prefers-color-scheme: dark) { .daymap .leaflet-tile-pane { filter:brightness(.82) contrast(1.05); } }
   .btn.wide { width:100%; margin-top:var(--s3); gap:var(--s2); }
   .btn.wide .ri { stroke:currentColor; margin:0; }
   
@@ -3051,7 +3057,7 @@ function renderExplore() {
       <div class="pc-body">
         <div class="row" style="align-items:flex-start;gap:4px">
           <b class="grow pc-name">${esc(a.name)}</b>
-          <button class="star sm ${state.saved[a.id]?'on':''}" data-act="star" data-id="${a.id}" aria-label="Save">${state.saved[a.id]?'★':'☆'}</button>
+          <button class="star sm ${state.saved[a.id]?'on':''}" data-act="star" data-id="${a.id}" aria-label="Save ${esc(a.name)}" aria-pressed="${!!state.saved[a.id]}">${state.saved[a.id]?'★':'☆'}</button>
         </div>
         <div class="muted pc-area">${esc(a.area || a.city)}${a.area ? ' · ' + (a.city === 'Rio de Janeiro' ? 'Rio' : 'SP') : ''}</div>
         ${a.short ? `<div class="pc-short">${esc(a.short)}</div>` : ''}
@@ -3073,7 +3079,7 @@ function renderExplore() {
       </div>
       <div class="row" style="margin-top:8px"><select id="newActWhen"><option value="any">Any time</option><option value="evening">Evening</option><option value="weekend">Weekend</option></select>
       <button class="btn" data-act="addCustomAct">Add</button></div></div>
-    <div class="card"><b>📷 Photos</b>
+    <div class="card"><b class="row">${ic('img')}Photos</b>
       <div class="muted">On a computer or phone with internet: fetch free photos (Wikimedia Commons) for every place. To move them to another device, export a photo pack and import it there.</div>
       <div class="row" style="margin-top:8px;flex-wrap:wrap">
         <button class="btn" data-act="fetchAll">Get photos for all places</button>
@@ -3101,6 +3107,7 @@ const IC = {
   idcard:'<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2"/><path d="M6 16c.8-1.5 5.2-1.5 6 0M14 10h4M14 13h4"/>',
   receipt:'<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
   copy:'<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 00-1-1H5a1 1 0 00-1 1v10a1 1 0 001 1h3"/>',
+  cal:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
   walk:'<circle cx="13" cy="4.5" r="1.8"/><path d="M9 20l3-6-2-3 1-4 3 3 3 1M11 8l-3 3M12 14l3 3 1 4"/>',
   ext:'<path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/>'
 };
@@ -3132,7 +3139,7 @@ function renderDetail(a) {
     <div class="herowrap">
       <div id="hero" class="hero">${catIcon(a.cat)}</div>
       <button class="fab left" data-act="back" aria-label="Back">${ic('back', 'fi')}</button>
-      <button class="fab right star ${state.saved[a.id] ? 'on' : ''}" data-act="star" data-id="${a.id}" aria-label="Save">${state.saved[a.id] ? '★' : '☆'}</button>
+      <button class="fab right star ${state.saved[a.id] ? 'on' : ''}" data-act="star" data-id="${a.id}" aria-label="Save ${esc(a.name)}" aria-pressed="${!!state.saved[a.id]}">${state.saved[a.id] ? '★' : '☆'}</button>
     </div>
     <h2 class="title">${esc(a.fullName || a.name)}</h2>
     <div class="muted">${esc(a.area ? a.area + ' · ' : '')}${esc(a.city)}</div>
@@ -3459,7 +3466,7 @@ function itemCard(r) {
       <label class="muted">Length<select data-act="setDur" data-id="${it.id}">${durs}</select></label>
     </div>
     ${it.start ? `<button class="ghost" style="margin-top:6px" data-act="clearStart" data-id="${it.id}">Remove time</button>` : ''}
-    ${r.warns.map(w => `<div class="warn" style="margin-top:6px;padding:6px 8px;border-radius:8px">⚠️ ${esc(w)}</div>`).join('')}
+    ${r.warns.map(w => `<div class="ag-warn">${ic('warn')}<span>${esc(w)}</span></div>`).join('')}
   </div>`;
 }
 // A plan item's attached document, as a chip that opens it
@@ -3523,7 +3530,7 @@ function renderTimeline(m) {
   return `<div class="ag">${html}</div>`;
 }
 function renderListView(m) {
-  const lines = m.sched.map(r => ({t: r.start, h: `<div class="li"><b>${fmtMin(r.start)}–${fmtMin(r.end % 1440)}</b> · ${esc(r.name)}${r.warns.length ? ' ⚠️' : ''}${r.it.done ? ' ✓' : ''}</div>`}));
+  const lines = m.sched.map(r => ({t: r.start, h: `<div class="li"><b>${fmtMin(r.start)}–${fmtMin(r.end % 1440)}</b> · ${esc(r.name)}${r.warns.length ? ' <span class="tag warnTag">Check</span>' : ''}${r.it.done ? ' ✓' : ''}</div>`}));
   if (m.wOn) lines.push({t: m.ws, h: `<div class="li muted"><b>${fmtMin(m.ws)}–${fmtMin(m.we)}</b> · Work</div>`});
   lines.sort((x, y) => x.t - y.t);
   return `<div class="card">${lines.map(l => l.h).join('') || '<span class="muted">No times set yet.</span>'}
@@ -3744,7 +3751,11 @@ function renderPlan() {
   const w = state.work || {s: '10:00', e: '18:00'};
   const ordered = m.sched.concat(m.unsched, m.cancelled);
   const savedOpts = allActs().filter(a => state.saved[a.id]).map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('');
-  return `<div class="chips nowrap" id="daychips">${chips}</div>
+  return `<div class="card holidays">${ic('cal')}<div class="grow"><b>Holidays this trip</b>
+      <div><b>Sun, Nov 15</b> · Proclamação da República</div>
+      <div><b>Fri, Nov 20</b> · Dia da Consciência Negra</div>
+      <div class="muted">Nov 20 is still a work day for you. Hours may change on holidays, so check first.</div></div></div>
+    <div class="chips nowrap" id="daychips">${chips}</div>
     <div class="row" style="padding:4px 0"><h2 class="grow" style="margin:6px 0">${dayLabel(iso)}</h2>
       <button class="ghost" data-act="toggleWork">${m.wOn ? 'Work day' : 'Day off'}</button></div>
     <div class="muted" style="margin:-4px 2px 4px">${m.rows.length} stop${m.rows.length === 1 ? '' : 's'} · ${m.rows.filter(r => r.status === 'booked').length} booked${m.wOn ? ' · work ' + fmtMin(m.ws) + ' to ' + fmtMin(m.we) : ''}</div>
