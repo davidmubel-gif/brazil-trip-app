@@ -873,6 +873,18 @@
   .rateline.stale { border-color:var(--warn); background:var(--warn-bg); }
   .rateline.stale .muted { color:var(--warn); }
   .rateline .ghost { flex:none; }
+  .again .chip { display:inline-flex; align-items:center; gap:6px; font-weight:600; }
+  .again .chip .ri { width:18px; height:18px; margin:0; }
+  .kpshow { display:flex; flex-direction:column; align-items:center; padding:var(--s3) 0 var(--s2); }
+  .kpshow #kpAmt { font-size:34px; font-weight:800; letter-spacing:-.02em; }
+  .kpshow #expConv { min-height:20px; }
+  .keypad { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+  .keypad button { min-height:52px; border:1px solid var(--line); border-radius:12px; background:var(--bg); color:var(--ink); font:inherit; font-size:22px; font-weight:700; display:flex; align-items:center; justify-content:center; }
+  .keypad button:active { background:var(--soft); }
+  .keypad .ri { margin:0; stroke:var(--ink); }
+  .toast { position:fixed; z-index:45; left:var(--s4); right:var(--s4); bottom:calc(var(--nav-h) + var(--s3)); max-width:608px; margin:0 auto; display:flex; align-items:center; gap:var(--s3);
+    background:var(--ink); color:var(--bg); border-radius:14px; padding:var(--s2) var(--s2) var(--s2) var(--s4); box-shadow:0 4px 16px rgba(0,0,0,.25); font-size:14px; font-weight:600; }
+  .toast .ghost { color:var(--bg); border-color:transparent; font-weight:800; text-decoration:underline; }
   .catgrid { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:4px; }
   .catgrid button { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; min-height:64px; border:1px solid var(--line); border-radius:12px; background:var(--card); color:var(--ink); font:inherit; font-size:13px; font-weight:600; padding:var(--s2) 4px; }
   .catgrid button .ri { margin:0; width:24px; height:24px; }
@@ -3458,12 +3470,48 @@ function rateLine() {
       <button class="ghost" data-act="getRate" ${ui.rateBusy ? 'aria-busy="true"' : ''}>${ui.rateBusy ? 'Updating…' : 'Update'}</button>
     </div>`;
 }
-// "≈ R$ 12,00" / "≈ COP 9.000" under the amount box while typing
+// Amount keypad: ui.kp holds what was typed, e.g. "48,5" (R$) or "45000" (COP)
+const kpVal = () => parseFloat((ui.kp || '').replace(',', '.')) || 0;
+function kpText() {
+  const isCOP = state.lastCur === 'COP', [int, dec] = (ui.kp || '').split(',');
+  const grouped = (int || '0').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return (isCOP ? 'COP ' : 'R$ ') + grouped + (dec !== undefined ? ',' + dec : '');
+}
+function kpPress(k) {
+  let s = ui.kp || '';
+  if (k === 'del') s = s.slice(0, -1);
+  else if (k === ',') { if (!s.includes(',')) s = (s || '0') + ','; }
+  else if (k === '000') { if (s && s !== '0') s += '000'; }
+  else if (s.includes(',') && s.split(',')[1].length >= 2) return;   // two decimals at most
+  else s = s === '0' ? k : s + k;
+  if (s.replace(/\D/g, '').length > 10) return;
+  ui.kp = s;
+}
+// "≈ R$ 12,00" / "≈ COP 9.000" under the amount while typing
 function expPreview() {
-  const box = document.getElementById('expAmt'), out = document.getElementById('expConv'); if (!box || !out) return;
-  const v = parseFloat(box.value);
+  const amt = document.getElementById('kpAmt'), out = document.getElementById('expConv'); if (!amt || !out) return;
+  amt.textContent = kpText();
+  const v = kpVal();
   out.textContent = v > 0 ? (state.lastCur === 'COP' ? '≈ ' + brl(state.rate > 0 ? v / state.rate : 0) : cop(v)) : '';
 }
+// Up to 5 recent, different expenses for the "Again" chips (same note, amount, currency and category count once)
+function recentExpenses() {
+  const seen = new Set(), out = [];
+  for (const e of state.expenses.slice().reverse()) {
+    const k = [e.note, e.cur, e.cur === 'COP' ? e.cop : e.amt, e.cat].join('|');
+    if (!seen.has(k)) { seen.add(k); out.push(e); }
+    if (out.length === 5) break;
+  }
+  return out;
+}
+// Short "Added … Undo" bar above the menu, gone after a few seconds
+function showToast(msg, undoId) {
+  ui.toast = {msg, undoId, at: Date.now()};
+  const at = ui.toast.at;
+  setTimeout(() => { if (ui.toast && ui.toast.at === at) { ui.toast = null; const el = document.getElementById('toast'); if (el) el.remove(); } }, 6000);
+}
+const renderToast = () => ui.toast ? `<div class="toast" id="toast" role="status"><span class="grow">${esc(ui.toast.msg)}</span>
+  ${ui.toast.undoId ? `<button class="ghost" data-act="undoExp" data-id="${ui.toast.undoId}">Undo</button>` : ''}</div>` : '';
 function renderBudget() {
   const days = tripDays();
   const todayIso = brazilToday();
@@ -3508,19 +3556,22 @@ function renderBudget() {
       </div>
     </div>
     <div class="card"><b>Log an expense</b>
-      <div class="grid2" style="margin-top:var(--s2)">
-        <label class="muted">Day<select id="expDate" data-act="expDate">${dayOpts}</select></label>
-        <label class="muted"><span id="expAmtLbl">Amount (${curCOP ? 'COP' : 'R$'})</span><input id="expAmt" type="number" inputmode="decimal" min="0" placeholder="${curCOP ? '0' : '0,00'}"></label>
-      </div>
+      ${recentExpenses().length ? `<div class="muted" style="margin-top:var(--s2)">Again (one tap adds it to ${dayLabel(selDate)})</div>
+        <div class="chips nowrap again">${recentExpenses().map(e => `<button class="chip" data-act="repeatExp" data-id="${e.id}" aria-label="Add again: ${esc(e.note || catOf(e)[1])}, ${e.cur === 'COP' ? copAmt(e.cop) : brl(e.amt)}">${catIc(catOf(e))}<span>${esc(e.note || catOf(e)[1])} · ${e.cur === 'COP' ? copAmt(e.cop) : brl(e.amt)}</span></button>`).join('')}</div>` : ''}
       <div class="curpick">
         <div class="seg" role="group" aria-label="Currency of this expense">
           <button class="${curCOP ? '' : 'on'}" aria-pressed="${!curCOP}" data-act="setCur" data-v="BRL">R$ reais</button>
           <button class="${curCOP ? 'on' : ''}" aria-pressed="${curCOP}" data-act="setCur" data-v="COP">COP pesos</button></div>
-        <div class="muted" id="expConv" aria-live="polite"></div>
       </div>
-      <div class="muted" style="margin-top:var(--s1)">Category</div>
+      <div class="kpshow" aria-live="polite"><span id="kpAmt">${kpText()}</span><span class="muted" id="expConv"></span></div>
+      <div class="keypad" role="group" aria-label="Amount keypad">${['1','2','3','4','5','6','7','8','9', curCOP ? '000' : ',', '0', 'del'].map(k =>
+        `<button data-act="kp" data-v="${k}" ${k === 'del' ? 'aria-label="Delete last digit"' : ''}>${k === 'del' ? ic('back') : k}</button>`).join('')}</div>
+      <div class="muted" style="margin-top:var(--s3)">Category</div>
       <div class="catgrid" role="group" aria-label="Category">${CATS.map(c => `<button class="${ui.expCat === c[0] ? 'on' : ''}" aria-pressed="${ui.expCat === c[0]}" data-act="setCat" data-v="${c[0]}">${catIc(c)}<span>${c[1]}</span></button>`).join('')}</div>
-      <label class="muted" style="display:block;margin-top:var(--s2)">What for?<input id="expNote" placeholder="Optional, e.g. lunch"></label>
+      <div class="grid2" style="margin-top:var(--s2)">
+        <label class="muted">Day<select id="expDate" data-act="expDate">${dayOpts}</select></label>
+        <label class="muted">What for?<input id="expNote" placeholder="Optional"></label>
+      </div>
       <button class="btn act wide" data-act="addExp">Add expense</button>
     </div>
     <div class="card"><div class="row"><b class="grow">Spent on ${dayLabel(selDate)}</b><span class="expamt"><b>${brl(spentDay)}</b><span class="muted">${cop(spentDay)}</span></span></div>
@@ -4003,7 +4054,8 @@ function render() {
   if (tab !== 'explore') { ui.sheet = false; ui.draft = null; }
   if (!(tab === 'explore' && ui.detail)) ui.daySheet = false;
   const fn = {explore:renderExplore, budget:renderBudget, plan:renderPlan, docs:renderDocs}[tab];
-  document.getElementById('main').innerHTML = fn() + (tab === 'plan' ? renderDocSheet() + renderTimeSheet() : '');
+  document.getElementById('main').innerHTML = fn() + (tab === 'plan' ? renderDocSheet() + renderTimeSheet() : '') + (tab === 'budget' ? renderToast() : '');
+  if (tab === 'budget') expPreview();
   if (tab === 'explore' && ui.detail) refreshPhotos();
   // centre the chosen day chip by scrolling the chip row sideways only (scrollIntoView also scrolled the page up)
   if (tab === 'plan' || tab === 'budget') { const c = document.querySelector('#daychips .chip.on'), row = document.getElementById('daychips');
@@ -4102,12 +4154,24 @@ const actions = {
     state.customActs.push(a); state.saved[a.id] = true;
   },
   addExp: () => {
-    const v = parseFloat(document.getElementById('expAmt').value); if (!(v > 0)) return false;
+    const v = kpVal();
+    if (!(v > 0)) { const s = document.getElementById('expConv'); if (s) s.textContent = 'Type an amount first'; return false; }
     const e = {id:uid(), date:document.getElementById('expDate').value, note:document.getElementById('expNote').value.trim()};
     if (state.lastCur === 'COP') Object.assign(e, {cur:'COP', cop:v}); else e.amt = v;
-    e.cat = ui.expCat || 'other'; ui.expCat = null;
+    e.cat = ui.expCat || 'other'; ui.expCat = null; ui.kp = '';
     state.expenses.push(e);
+    showToast(`Added ${e.note || catOf(e)[1]} · ${e.cur === 'COP' ? copAmt(e.cop) : brl(e.amt)}`, e.id);
   },
+  // one tap: the same expense again, on the day chosen in the form
+  repeatExp: t => {
+    const src = state.expenses.find(x => x.id === t.dataset.id); if (!src) return false;
+    const e = Object.assign({}, src, {id: uid(), date: document.getElementById('expDate').value});
+    state.expenses.push(e);
+    showToast(`Added ${e.note || catOf(e)[1]} · ${e.cur === 'COP' ? copAmt(e.cop) : brl(e.amt)} on ${dayLabel(e.date)}`, e.id);
+  },
+  undoExp: t => { state.expenses = state.expenses.filter(e => e.id !== t.dataset.id); ui.toast = null; },
+  // keypad presses update the amount in place (no redraw)
+  kp: t => { kpPress(t.dataset.v); expPreview(); return false; },
   // pick a category in place (no redraw, so a half-typed amount stays)
   setCat: t => {
     ui.expCat = t.dataset.v;
@@ -4120,8 +4184,9 @@ const actions = {
     state.lastCur = t.dataset.v; save();
     const isCOP = state.lastCur === 'COP';
     t.parentElement.querySelectorAll('button').forEach(b => { const on = b.dataset.v === state.lastCur; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
-    document.getElementById('expAmtLbl').textContent = 'Amount (' + (isCOP ? 'COP' : 'R$') + ')';
-    document.getElementById('expAmt').placeholder = isCOP ? '0' : '0,00';
+    if (isCOP && ui.kp) ui.kp = ui.kp.split(',')[0];   // pesos have no cents
+    const sp = document.querySelector('.keypad [data-v=","], .keypad [data-v="000"]');
+    if (sp) { sp.dataset.v = isCOP ? '000' : ','; sp.textContent = isCOP ? '000' : ','; }
     expPreview();
     return false;
   },
@@ -4162,7 +4227,6 @@ document.getElementById('main').addEventListener('click', e => {
   save(); render();
 });
 // Text boxes and dropdowns save when you finish typing / choose (without redrawing, so the keyboard stays open)
-document.getElementById('main').addEventListener('input', e => { if (e.target.id === 'expAmt') expPreview(); });
 document.getElementById('main').addEventListener('change', e => {
   const t = e.target, a = t.dataset.act;
   if (a === 'setConf') { state.docs.find(d => d.id === t.dataset.id).conf = t.value.trim(); save(); }
