@@ -2,8 +2,9 @@
 // First visit: it saves a copy of the app files. After that: it serves those saved copies,
 // so the app opens even with no internet. Bump CACHE ("v2", "v3"...) whenever you update the app.
 // Map tiles you have looked at are also kept (in TILES) so those map areas still show offline.
-const CACHE = 'trip-v18';
+const CACHE = 'trip-v19';
 const TILES = 'trip-tiles';
+const MAX_TILES = 3000;   // about 60 MB; the oldest tiles are dropped first
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -16,10 +17,19 @@ self.addEventListener('activate', e => {
   self.clients.claim();
 });
 
+let tilePuts = 0;
+async function trimTiles(c) {
+  const keys = await c.keys();   // oldest first
+  for (const k of keys.slice(0, Math.max(0, keys.length - MAX_TILES))) await c.delete(k);
+}
+
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   if (url.hostname === 'tile.openstreetmap.org') {
-    e.respondWith(caches.open(TILES).then(c => c.match(e.request).then(hit => hit || fetch(e.request).then(r => { if (r.ok) c.put(e.request, r.clone()); return r; }).catch(() => new Response('', {status: 504})))));
+    e.respondWith(caches.open(TILES).then(c => c.match(e.request).then(hit => hit || fetch(e.request).then(r => {
+      if (r.ok) { c.put(e.request, r.clone()).then(() => { if (++tilePuts % 50 === 0) trimTiles(c); }); }
+      return r;
+    }).catch(() => new Response('', {status: 504})))));
     return;
   }
   e.respondWith(caches.match(e.request).then(hit => hit || fetch(e.request)));

@@ -3555,7 +3555,8 @@ async function initMap() {
   if (!el) return;
   if (typeof L === 'undefined') { el.textContent = 'Map library did not load.'; return; }
   const map = leafMap = L.map(el).setView([-23.55, -46.64], 11);
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19, attribution: '© OpenStreetMap'}).addTo(map);
+  // crossOrigin: without it tiles load as "opaque" images, which sw.js cannot check and so never saves for offline
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19, crossOrigin: true, attribution: '© OpenStreetMap'}).addTo(map);
   drawMap(map);
   const status = document.getElementById('mapStatus'), co = coordsLoad();
   const missing = dayStops().filter(s => !co[s.a.id] && !NO_PIN.has(s.a.id));
