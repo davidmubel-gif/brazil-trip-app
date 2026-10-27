@@ -911,7 +911,11 @@
   #viewer .vbtn .ri { stroke:currentColor; margin:0; }
   #viewer .vbtn.flip .ri { transform:rotate(180deg); }
   .kvs { display:flex; flex-direction:column; margin-bottom:var(--s3); border:1px solid var(--line); border-radius:12px; padding:2px var(--s3); }
-  .kv { display:flex; justify-content:space-between; gap:var(--s3); padding:6px 0; border-top:1px solid var(--line); font-size:14px; }
+  .kv { display:flex; justify-content:space-between; align-items:center; gap:var(--s3); width:100%; min-height:var(--tap); padding:6px 0; border:0; border-top:1px solid var(--line); background:none; color:var(--ink); font:inherit; font-size:14px; text-align:left; cursor:copy; }
+  .kv:active .kvv { color:var(--accent); }
+  .docacts { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 var(--s3); }
+  .docacts .act { gap:6px; text-decoration:none; color:var(--ink); }
+  .docacts .act .ri { width:18px; height:18px; margin:0; }
   .kv:first-child { border-top:0; }
   .kv > span:last-child { text-align:right; font-weight:600; overflow-wrap:anywhere; }
   .addinfo { display:flex; align-items:center; gap:var(--s2); width:100%; min-height:var(--tap); margin-bottom:var(--s3); padding:0 var(--s3); border:1px dashed var(--line); border-radius:12px; background:none; color:var(--accent); font:inherit; font-size:14px; font-weight:700; }
@@ -3259,6 +3263,8 @@ const IC = {
   copy:'<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 00-1-1H5a1 1 0 00-1 1v10a1 1 0 001 1h3"/>',
   cal:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
   shield:'<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
+  phone:'<path d="M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a2 2 0 01-2 2A16 16 0 013 6a2 2 0 012-2"/>',
+  chat:'<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>',
   fork:'<path d="M7 3v8a2 2 0 002 2v8M5 3v5a2 2 0 004 0V3M17 21V3c-2 1-3 4-3 7s1 3 3 3"/>',
   ticket:'<path d="M3 8a2 2 0 002-2h14a2 2 0 002 2v2a2 2 0 000 4v2a2 2 0 00-2 2H5a2 2 0 00-2-2v-2a2 2 0 000-4z"/><path d="M14 7v2M14 11v2M14 15v2"/>',
   bag:'<path d="M5 8h14l-1 13H6z"/><path d="M9 8V6a3 3 0 016 0v2"/>',
@@ -3941,6 +3947,7 @@ function renderDocSheet() {
         <div class="grow"><b style="font-size:18px">${esc(d.title)}</b><div class="muted">${docType(d).label}${docSummary(d) ? ' · ' + esc(docSummary(d)) : ''}</div></div>
         <button class="x" data-act="closeDocSheet" aria-label="Close">×</button></div>
       ${docFields(d) ? `<div class="kvs">${docFields(d)}</div>` : ''}
+      ${docActions(d)}
       ${d.notes ? `<div class="docnotes">${esc(d.notes)}</div>` : ''}
       ${docType(d).code ? `<div class="ilabel" style="margin-top:var(--s2)">${docType(d).code}</div>
       ${d.conf ? `<div class="row"><span class="conf grow">${esc(d.conf)}</span><button class="btn" data-act="copy" data-id="${d.id}">Copy</button></div>`
@@ -4313,7 +4320,23 @@ const DOC_TYPES = {
   id: {label: 'Passport or ID', icon: 'idcard', code: null, fields: [['name', 'Name on document'], ['number', 'Document number'], ['country', 'Issued by'], ['expiry', 'Expires', 'date']]},
   other: {label: 'Other', icon: 'note', code: 'Reference', fields: [['date', 'Date', 'date'], ['time', 'Time', 'time'], ['address', 'Address']]}
 };
+// a phone for the venue, and a booking link on everything except passports
+DOC_TYPES.event.fields.push(['phone', 'Phone', 'tel']);
+for (const [k, t] of Object.entries(DOC_TYPES)) if (k !== 'id') t.fields.push(['link', 'Booking link', 'url']);
 const docType = d => DOC_TYPES[d.type] || DOC_TYPES.other;
+// One-tap actions for a booking: open the place in Google Maps, call or WhatsApp, open the booking link
+function docActions(d) {
+  const f = d.f || {}, out = [];
+  const place = f.address || f.meeting || f.venue || (d.type === 'flight' && f.from ? f.from + ' airport' : '') || (d.type === 'bus' && f.from ? f.from : '');
+  if (place) out.push(`<a class="ghost act" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place)}">${ic('pin')}<span>Map</span></a>`);
+  const phone = f.phone || f.hotline, digits = (phone || '').replace(/[^\d+]/g, '');
+  if (digits.replace('+', '').length >= 6) {
+    out.push(`<a class="ghost act" href="tel:${digits}">${ic('phone')}<span>Call</span></a>`);
+    out.push(`<a class="ghost act" target="_blank" rel="noopener" href="https://wa.me/${digits.replace(/\D/g, '')}">${ic('chat')}<span>WhatsApp</span></a>`);
+  }
+  if (f.link && /^https?:\/\//i.test(f.link)) out.push(`<a class="ghost act" target="_blank" rel="noopener" href="${esc(f.link)}">${ic('link')}<span>Booking</span></a>`);
+  return out.length ? `<div class="docacts">${out.join('')}</div>` : '';
+}
 // a sensible type for cards made before types existed, from their title
 // (a function declaration, because load() needs it before this part of the file has run)
 function guessDocType(t) {
@@ -4384,6 +4407,7 @@ function renderNextUp() {
     <div class="nextwhen">${countdown(next)}</div>
     ${key.filter(Boolean).length ? `<div class="muted">${key.filter(Boolean).map(esc).join(' · ')}</div>` : ''}
     ${d.conf ? `<div class="nextcode"><span class="muted">${T.code || 'Code'}</span> <b>${esc(d.conf)}</b></div>` : ''}
+    ${docActions(d)}
     <div class="row" style="flex-wrap:wrap;margin-top:var(--s3)">
       <span data-nextatt="${d.id}"></span>
       ${d.conf ? `<button class="ghost" data-act="copy" data-id="${d.id}">${ic('copy')}<span>Copy code</span></button>` : ''}
@@ -4393,13 +4417,14 @@ function renderNextUp() {
   </div>`;
 }
 // filled-in fields as label/value rows
+// each row is a button: tap to copy that value (door code, Wi-Fi, address...)
 const docFields = d => docType(d).fields.filter(([k]) => d.f && d.f[k]).map(([k, l, ty]) =>
-  `<div class="kv"><span class="muted">${l}</span><span>${ty === 'date' ? fDate(d.f[k]) : esc(d.f[k])}</span></div>`).join('');
+  `<button class="kv" data-act="copyField" data-id="${d.id}" data-k="${k}" aria-label="Copy ${l}"><span class="muted">${l}</span><span class="kvv">${ty === 'date' ? fDate(d.f[k]) : esc(d.f[k])}</span></button>`).join('');
 // Bottom sheet to edit every field of a booking (works on a draft; nothing changes until Save)
 function renderDocEdit() {
   const e = ui.docEdit; if (!e) return '';
   const dr = e.draft, T = DOC_TYPES[dr.type] || DOC_TYPES.other;
-  const inp = (k, l, ty) => `<label class="muted">${l}<input ${ty ? `type="${ty === 'tel' ? 'tel' : ty}"` : ''} value="${esc((dr.f || {})[k] || '')}" data-act="docField" data-k="${k}"></label>`;
+  const inp = (k, l, ty) => `<label class="muted">${l}<input ${ty ? `type="${ty}"` : ''} ${ty === 'tel' ? 'placeholder="+55 21 98765 4321"' : ty === 'url' ? 'placeholder="https://"' : ''} value="${esc((dr.f || {})[k] || '')}" data-act="docField" data-k="${k}"></label>`;
   return `<div class="backdrop" data-act="closeDocEdit"></div>
     <div class="sheet" role="dialog" aria-label="Edit ${esc(dr.title || 'booking')}"><div class="grab" aria-hidden="true"></div>
       <div class="row"><b class="grow" style="font-size:18px">${e.isNew ? 'New booking' : 'Edit booking'}</b><button class="x" data-act="closeDocEdit" aria-label="Close">×</button></div>
@@ -4533,6 +4558,7 @@ function renderDocs() {
         ${d.conf ? '<span class="tag okTag">Booked</span>' : ''}
         <button class="ghost" data-act="editDoc" data-id="${d.id}" aria-label="Edit ${esc(d.title)}">Edit</button></div>
       ${docFields(d) ? `<div class="kvs">${docFields(d)}</div>` : `<button class="addinfo" data-act="editDoc" data-id="${d.id}">${ic('note')}Add the ${T.label.toLowerCase()} details</button>`}
+      ${docActions(d)}
       ${d.notes ? `<div class="docnotes">${esc(d.notes)}</div>` : ''}
       ${T.code ? `<label class="ilabel" for="conf-${d.id}">${T.code}</label>
       <div class="copyfield">
@@ -4781,6 +4807,12 @@ const actions = {
   },
   delDoc: t => { if (confirm('Delete this booking and its files?')) { state.docs = state.docs.filter(d => d.id !== t.dataset.id); photosSet(attKey(t.dataset.id), []).catch(() => {}); ui.docEdit = null; } else return false; },
   openAtt: t => { openAtt(t.dataset.id, +t.dataset.i); return false; },
+  copyField: t => {
+    const d = state.docs.find(x => x.id === t.dataset.id); if (!d || !d.f) return false;
+    const v = t.querySelector('.kvv'), shown = v.textContent;
+    (navigator.clipboard ? navigator.clipboard.writeText(shown) : Promise.reject()).then(() => { v.textContent = 'Copied'; setTimeout(() => v.textContent = shown, 1200); }).catch(() => {});
+    return false;
+  },
   jumpDoc: t => { const el = document.getElementById('doc-' + t.dataset.id); if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'}); return false; },
   copy: t => {
     const d = state.docs.find(x => x.id === t.dataset.id); if (!d) return false;
