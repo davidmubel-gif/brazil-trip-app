@@ -913,6 +913,26 @@
   .kvs { display:flex; flex-direction:column; margin-bottom:var(--s3); border:1px solid var(--line); border-radius:12px; padding:2px var(--s3); }
   .kv { display:flex; justify-content:space-between; align-items:center; gap:var(--s3); width:100%; min-height:var(--tap); padding:6px 0; border:0; border-top:1px solid var(--line); background:none; color:var(--ink); font:inherit; font-size:14px; text-align:left; cursor:copy; }
   .kv:active .kvv { color:var(--accent); }
+  /* Docs list: compact rows that open a booking's page */
+  .rowcard { padding:0 var(--s3); margin-top:var(--s2); }
+  .docrow { display:flex; align-items:center; gap:var(--s3); width:100%; min-height:64px; padding:var(--s2) 0; border:0; border-top:1px solid var(--line); background:none; color:var(--ink); font:inherit; text-align:left; }
+  .docrow:first-child { border-top:0; }
+  .docrow .doc-ic { width:36px; height:36px; border-radius:10px; }
+  .docrow .doc-ic .ri { width:20px; height:20px; }
+  .docrow .grow { display:flex; flex-direction:column; min-width:0; }
+  .docrow .grow b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .docrow .grow .muted { font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .docrow .tag { flex:none; }
+  .docrow > .chev { margin:0; transform:rotate(-90deg); flex:none; stroke:var(--muted); }
+  .docfilters { margin-top:var(--s3); }
+  .chip .cnt { font-size:12px; opacity:.75; margin-left:2px; }
+  .docpage { padding-top:calc(var(--s3) + env(safe-area-inset-top)); }
+  .backbtn { gap:4px; margin-bottom:var(--s1); }
+  .backbtn .ri { width:18px; height:18px; margin:0; stroke:currentColor; }
+  .bfly .bar { margin-bottom:var(--s2); }
+  .bfly .check .muted { font-size:12px; }
+  .donechecks summary { list-style:none; cursor:pointer; min-height:var(--tap); display:flex; align-items:center; color:var(--accent); font-size:14px; font-weight:700; }
+  .donechecks summary::-webkit-details-marker { display:none; }
   .emergency { border:2px solid var(--warn); padding:var(--s3) var(--s4); }
   .emhead { display:flex; align-items:center; gap:var(--s3); margin-bottom:var(--s2); }
   .emhead .doc-ic { background:var(--warn-bg); }
@@ -4656,6 +4676,20 @@ function renderBackupCard() {
     <div class="muted" style="margin-top:var(--s2)">On a phone this opens the share menu: save it to Files or Google Drive, or email it to yourself. Restoring replaces what's in the app now.</div>
   </div>`;
 }
+// "Before you fly": every booking's checklist in one place, with progress; done items fold away
+function renderBeforeFly() {
+  const items = state.docs.flatMap(d => d.checks.map((c, i) => ({d, c, i})));
+  if (!items.length) return `<div class="card empty">${ic('check')}<span>No checklist yet. Open a booking and add the things to sort out before you go; they all gather here.</span></div>`;
+  const done = items.filter(x => x.c.d), open = items.filter(x => !x.c.d), pct = Math.round(done.length / items.length * 100);
+  const row = x => `<label class="check ${x.c.d ? 'done' : ''}"><input type="checkbox" ${x.c.d ? 'checked' : ''} data-act="toggleCheck" data-id="${x.d.id}" data-i="${x.i}">
+    <span class="t">${esc(x.c.t)}<span class="muted"> · ${esc(x.d.title)}</span></span></label>`;
+  return `<div class="card bfly"><div class="row"><b class="grow">Before you fly</b><span class="muted">${done.length} of ${items.length} done</span></div>
+    <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><i style="width:${pct}%"></i></div>
+    ${open.length ? `<div class="checks">${open.slice(0, 4).map(row).join('')}</div>` : '<div class="muted">All done. Boa viagem!</div>'}
+    ${open.length > 4 ? `<details class="donechecks" ${ui.bflyAll ? 'open' : ''}><summary data-act="bflyAll">Show ${open.length - 4} more</summary><div class="checks">${open.slice(4).map(row).join('')}</div></details>` : ''}
+    ${done.length ? `<details class="donechecks"><summary>${done.length} done</summary><div class="checks">${done.map(row).join('')}</div></details>` : ''}
+  </div>`;
+}
 function renderDocs() {
   const usedIn = d => { const u = docUses(d.id); return u.length ? `<div class="ilabel" style="margin-top:var(--s2)">Used in your plan</div>
       <div class="chips">${u.map(x => `<button class="chip" data-act="goPlanDay" data-v="${x.date}">${dayLabel(x.date)} · ${esc(itemName(x.it))}</button>`).join('')}</div>` : ''; };
@@ -4685,20 +4719,44 @@ function renderDocs() {
       <div class="row addrow"><input placeholder="Add a checklist item" id="chk-${d.id}" aria-label="New checklist item for ${esc(d.title)}"><button class="ghost" data-act="addCheck" data-id="${d.id}">Add</button></div>
     </div>`;
   };
-  // group by the day of each booking's first moment, in time order; then documents; then undated
+  // one booking's full page, opened from its row (like a place page)
+  if (ui.docPage) {
+    const d = state.docs.find(x => x.id === ui.docPage);
+    if (d) return `<div class="docpage"><button class="ghost backbtn" data-act="closeDocPage">${ic('back')}<span>All bookings</span></button>${cardOf(d)}</div>`;
+    ui.docPage = null;
+  }
   const first = d => docMoments(d)[0];
-  const dated = state.docs.filter(first).sort((a, b) => (first(a).date + (first(a).time || '99')).localeCompare(first(b).date + (first(b).time || '99')));
+  // compact row: icon, name, when, to-dos, and a tag (Check / Booked / Add details)
+  const rowOf = d => {
+    const T = docType(d), mo = first(d), s = idStatus(d), todo = d.checks.filter(c => !c.d).length;
+    const when = mo ? `${mo.label}${mo.time ? ' ' + mo.time : ''}` : docSummary(d) || T.label;
+    const tag = s && (s.level === 'bad' || s.level === 'warn') ? '<span class="tag warnTag">Check</span>'
+      : d.conf ? '<span class="tag okTag">Booked</span>' : !Object.keys(d.f || {}).length ? '<span class="tag">Add details</span>' : '';
+    return `<button class="docrow" data-act="openDocPage" data-id="${d.id}"><span class="doc-ic">${ic(T.icon)}</span>
+      <span class="grow"><b>${esc(d.title)}</b><span class="muted">${esc(when)}${todo ? ` · ${todo} to do` : ''}</span></span>${tag}${ic('chev', 'ri chev')}</button>`;
+  };
+  // filter chips by type, with counts (only types you have)
+  const FILTERS = [['all', 'All', () => true], ['flight', 'Flights', d => d.type === 'flight'], ['stay', 'Stays', d => d.type === 'stay'],
+    ['bus', 'Buses and trains', d => d.type === 'bus'], ['fun', 'Events and tours', d => d.type === 'event' || d.type === 'tour'],
+    ['docs', 'Documents', d => d.type === 'id' || d.type === 'insurance'], ['other', 'Other', d => d.type === 'other']];
+  const fl = FILTERS.find(f => f[0] === ui.docFilter && (f[0] === 'all' || state.docs.some(f[2]))) || FILTERS[0];
+  const filterChips = state.docs.length ? `<div class="chips nowrap docfilters">${FILTERS.filter(f => f[0] === 'all' || state.docs.some(f[2]))
+    .map(f => `<button class="chip ${f === fl ? 'on' : ''}" data-act="docFilter" data-v="${f[0]}">${f[1]} <span class="cnt">${state.docs.filter(f[2]).length}</span></button>`).join('')}</div>` : '';
+  const shown = state.docs.filter(fl[2]);
+  // group by the day of each booking's first moment, in time order; then documents; then undated
+  const dated = shown.filter(first).sort((a, b) => (first(a).date + (first(a).time || '99')).localeCompare(first(b).date + (first(b).time || '99')));
   const days = [...new Set(dated.map(d => first(d).date))];
-  const docsOnly = state.docs.filter(d => !first(d) && (d.type === 'id' || d.type === 'insurance'));
-  const undated = state.docs.filter(d => !first(d) && d.type !== 'id' && d.type !== 'insurance');
-  const section = (title, list, note) => list.length ? `<h3 class="dochead">${title}${note ? `<span class="muted">${note}</span>` : ''}</h3>${list.map(cardOf).join('')}` : '';
+  const docsOnly = shown.filter(d => !first(d) && (d.type === 'id' || d.type === 'insurance'));
+  const undated = shown.filter(d => !first(d) && d.type !== 'id' && d.type !== 'insurance');
+  const section = (title, list, note) => list.length ? `<h3 class="dochead">${title}${note ? `<span class="muted">${note}</span>` : ''}</h3><div class="card rowcard">${list.map(rowOf).join('')}</div>` : '';
   const cards = days.map(day => section(dayLabel(day), dated.filter(d => first(d).date === day), day === brazilToday() ? 'Today' : '')).join('')
     + section('Documents', docsOnly) + section('No date yet', undated, 'add a date with Edit');
-  const empty = `<div class="card empty big-empty">${ic('note')}<div><b>No documents yet</b>
-    <div class="muted">Add your flights, stays and bus tickets so their confirmation numbers are one tap away, even offline.</div></div></div>`;
+  const empty = state.docs.length ? `<div class="card empty">${ic('note')}<span>Nothing here in "${fl[1]}". Pick another filter, or add one below.</span></div>`
+    : `<div class="card empty big-empty">${ic('note')}<div><b>Start your trip folder</b>
+      <div class="muted">Add your flights, stays, bus tickets and event tickets. Their codes, addresses and tickets are then one tap away, even offline.</div></div></div>`;
   const idAlerts = state.docs.filter(d => { const s = idStatus(d); return s && (s.level === 'bad' || s.level === 'warn'); })
     .map(d => `<button class="idstat ${idStatus(d).level} top" data-act="jumpDoc" data-id="${d.id}">${ic('warn')}<span><b>${esc(d.title)}</b> · ${esc(idStatus(d).msg)}</span></button>`).join('');
-  return idAlerts + renderEmergency() + renderNextUp() + (cards || empty) + `<div class="card"><b>Add a booking or document</b>
+  return idAlerts + renderEmergency() + renderNextUp() + renderBeforeFly() + filterChips + (cards || empty) + `<div class="card"><b>Add a booking or document</b>
       <div class="grid2" style="margin-top:var(--s2)">
         <label class="muted">Name<input id="newDoc" placeholder="Travel insurance"></label>
         <label class="muted">Type<select id="newDocType">${Object.entries(DOC_TYPES).map(([k, t]) => `<option value="${k}">${t.label}</option>`).join('')}</select></label>
@@ -4727,7 +4785,7 @@ function render() {
   const sub = document.getElementById('sub');
   sub.textContent = tab === 'explore' ? `Brazil trip · ${dayLabel(days[0])} → ${dayLabel(days[days.length-1])}` : '';
   sub.style.display = sub.textContent ? '' : 'none';
-  document.getElementById('hdr').hidden = (tab === 'explore' && !!ui.detail);
+  document.getElementById('hdr').hidden = (tab === 'explore' && !!ui.detail) || (tab === 'docs' && !!ui.docPage);
 }
 
 /* ============ 3. THE BUTTONS ============
@@ -4737,6 +4795,7 @@ document.getElementById('nav').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   tab = b.dataset.tab;
   if (ui.detail) { ui.detail = null; history.back(); }
+  if (ui.docPage) { ui.docPage = null; history.back(); }
   render(); window.scrollTo(0, 0);
 });
 
@@ -4897,7 +4956,7 @@ const actions = {
   takeSuggest: t => { const i = findPlanItem(t.dataset.id); if (i) i.docId = t.dataset.v; },
   skipSuggest: t => { const i = findPlanItem(t.dataset.id); if (i) (i.noSuggest ||= []).push(t.dataset.v); },
   closeDocSheet: () => { ui.docSheet = null; },
-  goDocs: () => { ui.docSheet = null; tab = 'docs'; window.scrollTo(0, 0); },
+  goDocs: () => { const id = ui.docSheet; ui.docSheet = null; tab = 'docs'; ui.scroll = 0; if (id) { ui.docPage = id; history.pushState({doc: 1}, ''); } window.scrollTo(0, 0); },
   goPlanDay: t => { tab = 'plan'; ui.planDay = t.dataset.v; window.scrollTo(0, 0); },
   delPlan: t => { state.plan[ui.planDay] = (state.plan[ui.planDay]||[]).filter(i => i.id !== t.dataset.id); },
   toggleCheck: t => { const d = state.docs.find(x => x.id === t.dataset.id); d.checks[t.dataset.i].d = !d.checks[t.dataset.i].d; },
@@ -4917,7 +4976,7 @@ const actions = {
     if (e.isNew) state.docs.push(dr); else state.docs = state.docs.map(d => d.id === e.id ? dr : d);
     ui.docEdit = null;
   },
-  delDoc: t => { if (confirm('Delete this booking and its files?')) { state.docs = state.docs.filter(d => d.id !== t.dataset.id); photosSet(attKey(t.dataset.id), []).catch(() => {}); ui.docEdit = null; } else return false; },
+  delDoc: t => { if (confirm('Delete this booking and its files?')) { state.docs = state.docs.filter(d => d.id !== t.dataset.id); photosSet(attKey(t.dataset.id), []).catch(() => {}); ui.docEdit = null; if (ui.docPage === t.dataset.id) ui.docPage = null; } else return false; },
   openAtt: t => { openAtt(t.dataset.id, +t.dataset.i); return false; },
   toggleEm: t => { ui.emOpen = !t.parentElement.open; return false; },   // the browser opens/closes it; just remember
   editEm: () => { ui.emEdit = true; ui.emOpen = true; },
@@ -4937,7 +4996,12 @@ const actions = {
     (navigator.clipboard ? navigator.clipboard.writeText(shown) : Promise.reject()).then(() => { v.textContent = 'Copied'; setTimeout(() => v.textContent = shown, 1200); }).catch(() => {});
     return false;
   },
-  jumpDoc: t => { const el = document.getElementById('doc-' + t.dataset.id); if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'}); return false; },
+  // open a booking's full page; the phone's back button (or "All bookings") returns to the list where you were
+  openDocPage: t => { ui.scroll = window.scrollY; ui.docPage = t.dataset.id; history.pushState({doc: 1}, ''); setTimeout(() => window.scrollTo(0, 0), 0); },
+  jumpDoc: t => actions.openDocPage(t),
+  closeDocPage: () => { history.back(); return false; },
+  docFilter: t => { ui.docFilter = t.dataset.v; },
+  bflyAll: t => { ui.bflyAll = !t.parentElement.open; return false; },   // remember the "Show more" fold
   copy: t => {
     const d = state.docs.find(x => x.id === t.dataset.id); if (!d) return false;
     const box = document.getElementById('conf-' + d.id); if (box) d.conf = box.value.trim();   // just typed, not saved yet
@@ -4979,7 +5043,7 @@ document.getElementById('main').addEventListener('change', e => {
   else if (a === 'addPhotos') { addPhotos(Array.from(t.files)); t.value = ''; }
 });
 
-window.addEventListener('popstate', () => { ui.detail = null; render(); window.scrollTo(0, ui.scroll || 0); });
+window.addEventListener('popstate', () => { ui.detail = null; ui.docPage = null; render(); window.scrollTo(0, ui.scroll || 0); });
 
 render();
 
