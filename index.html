@@ -143,6 +143,11 @@
   .wxsun .ri { color:var(--hi); }
   .keepdata { display:flex; gap:var(--s2); align-items:flex-start; margin-top:var(--s3); padding-top:var(--s3); border-top:1px solid var(--line); font-size:13px; }
   .keepdata .ri { color:var(--warn); flex:none; } .keepdata.ok .ri { color:var(--accent); }
+  .exsearch { display:flex; flex-direction:column; gap:var(--s2); margin:var(--s2) 0; }
+  .exsearch input[type=search] { width:100%; }
+  .exhint { font-size:13px; margin:0 4px; }
+  .pc-dist { display:flex; align-items:center; gap:4px; font-size:13px; font-weight:600; color:var(--accent); margin-top:2px; }
+  .pc-dist .ri { width:14px; height:14px; }
   .why { font-size:13px; color:var(--muted); margin-top:6px; padding-left:var(--s2); border-left:3px solid var(--hi); }
   .ag-free { border:1px dashed var(--line); border-radius:12px; padding:8px 12px; color:var(--muted); font-size:13px; text-align:center; }
   .ag-card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:var(--s3) 14px; display:flex; flex-direction:column; gap:4px; }
@@ -3389,6 +3394,48 @@ function previewCount(d) {
   if (d.mode === 'wknd') l = l.filter(a => a.wknd);
   return l.length;
 }
+// Work spots you've set in Plan (each once), to sort Explore by distance from
+function sortSpots() {
+  const out = [];
+  for (const iso of Object.keys(state.workFrom || {}).sort()) {
+    const s = workSpot(iso); if (!s || !coordsLoad()[s.a.id]) continue;
+    const d = new Date(iso + 'T12:00:00'), have = out.find(x => x.id === s.a.id), day = d.toLocaleDateString('en-US', {weekday: 'short'}) + ' ' + d.getDate();
+    if (have) have.days += ', ' + day; else out.push({id: s.a.id, name: s.name, days: day});
+  }
+  return out;
+}
+// The filtered (and searched, and maybe sorted) list of place cards, with the count line
+function exploreListHtml() {
+  let list = allActs().filter(a => ui.city === 'All' || a.city === ui.city);
+  if (ui.cat !== 'all') list = list.filter(a => a.cat === ui.cat);
+  if (ui.mode === 'morn') list = list.filter(a => a.morn);
+  if (ui.mode === 'eve') list = list.filter(a => a.eve);
+  if (ui.mode === 'wknd') list = list.filter(a => a.wknd);
+  const words = fold(ui.q).split(/\s+/).filter(Boolean);   // fold: lower case without accents, so "sao bento" finds "São Bento"
+  if (words.length) list = list.filter(a => { const hay = fold([a.name, a.fullName, a.area, a.city, a.short, CAT_LABEL[a.cat], a.transit && a.transit.station, ...(a.acts || []), a.note].join(' '));
+    return words.every(w => hay.includes(w)); });
+  // distance from the chosen work spot: nearest first, places without a pin last
+  const co = ui.sortFrom ? coordsLoad() : null, from = co && co[ui.sortFrom];
+  const dist = a => from && co[a.id] ? distKm(from, co[a.id]) : Infinity;
+  if (from) list = list.slice().sort((x, y) => dist(x) - dist(y));
+  const cards = list.map((a, i) => {
+    const st = cardStation(a), km = dist(a), t = from && km < 60 ? travelBetween(ui.sortFrom, a.id) : null;
+    return `
+    <div class="card place pc" data-act="open" data-id="${a.id}">
+      <div class="thumb" data-thumb="${a.id}">${catIcon(a.cat)}<span class="num">${i + 1}</span></div>
+      <div class="pc-body">
+        <div class="row" style="align-items:flex-start;gap:4px">
+          <b class="grow pc-name">${esc(a.name)}</b>
+          <button class="star sm ${state.saved[a.id]?'on':''}" data-act="star" data-id="${a.id}" aria-label="Save ${esc(a.name)}" aria-pressed="${!!state.saved[a.id]}">${state.saved[a.id]?'★':'☆'}</button>
+        </div>
+        <div class="muted pc-area">${esc(a.area || a.city)}${a.area ? ' · ' + (a.city === 'Rio de Janeiro' ? 'Rio' : 'SP') : ''}</div>
+        ${from ? `<div class="pc-dist">${ic('pin')}${km < 0.05 ? 'Your work spot' : t ? `${fmtDist(km)} · ${travelText(t)}` : km === Infinity ? 'Distance unknown' : 'Other city'}</div>` : ''}
+        ${a.short ? `<div class="pc-short">${esc(a.short)}</div>` : ''}
+        <div class="pc-tags">${a.cat?`<span class="tag">${esc(CAT_LABEL[a.cat] || a.cat)}</span>`:''}${a.free?'<span class="tag">Free</span>':''}${st?`<span class="tag">${esc(st)}</span>`:''}${a.morn?'<span class="tag">Before work</span>':''}${a.eve?'<span class="tag">After work</span>':''}${a.wknd?'<span class="tag">Weekend</span>':''}${a.check?'<span class="tag warnTag">Check hours</span>':''}</div>
+      </div>
+    </div>`; }).join('') || `<p class="muted">${words.length ? `Nothing matches "${esc(ui.q)}"${ui.city !== 'All' || ui.cat !== 'all' || ui.mode !== 'any' ? ' with these filters' : ''}.` : 'Nothing matches this filter.'}</p>`;
+  return `<div class="muted" style="margin:0 4px">${list.length} place${list.length===1?'':'s'}${from ? ', nearest first' : ''} · tap one for the full page</div>${cards}`;
+}
 function renderExplore() {
   if (ui.detail) {
     const p = actById(ui.detail);
@@ -3397,11 +3444,6 @@ function renderExplore() {
   }
   const cities = ['All', 'São Paulo', 'Rio de Janeiro'];
   const modes = [['any','Any time'], ['morn','Before work'], ['eve','After work'], ['wknd','Weekend days']];
-  let list = allActs().filter(a => ui.city === 'All' || a.city === ui.city);
-  if (ui.cat !== 'all') list = list.filter(a => a.cat === ui.cat);
-  if (ui.mode === 'morn') list = list.filter(a => a.morn);
-  if (ui.mode === 'eve') list = list.filter(a => a.eve);
-  if (ui.mode === 'wknd') list = list.filter(a => a.wknd);
   const chips = cities.map(c => `<button class="chip ${ui.city===c?'on':''}" data-act="city" data-v="${c}">${c === 'Rio de Janeiro' ? 'Rio' : c}</button>`).join('');
   const CATS = [['all','All types'],['museum','Museums'],['monument/architecture','Monuments'],['neighborhood/culture','Neighborhoods'],['park/view','Parks & views'],['nightlife/music','Nightlife & music'],['day trip','Day trips'],['experience','Experiences']];
   const dr = ui.draft || {mode: ui.mode, cat: ui.cat};
@@ -3417,29 +3459,19 @@ function renderExplore() {
       <div class="muted" style="margin-top:8px"><b>Type</b></div><div class="chips">${chips3}</div>
       <div class="row" style="margin-top:16px"><button class="ghost" data-act="clearFilters">Clear</button><span class="grow"></span><button class="btn" data-act="applyFilters">Show ${previewCount(dr)} places</button></div>
     </div>` : '';
-  const cards = list.map((a, i) => {
-    const st = cardStation(a);
-    return `
-    <div class="card place pc" data-act="open" data-id="${a.id}">
-      <div class="thumb" data-thumb="${a.id}">${catIcon(a.cat)}<span class="num">${i + 1}</span></div>
-      <div class="pc-body">
-        <div class="row" style="align-items:flex-start;gap:4px">
-          <b class="grow pc-name">${esc(a.name)}</b>
-          <button class="star sm ${state.saved[a.id]?'on':''}" data-act="star" data-id="${a.id}" aria-label="Save ${esc(a.name)}" aria-pressed="${!!state.saved[a.id]}">${state.saved[a.id]?'★':'☆'}</button>
-        </div>
-        <div class="muted pc-area">${esc(a.area || a.city)}${a.area ? ' · ' + (a.city === 'Rio de Janeiro' ? 'Rio' : 'SP') : ''}</div>
-        ${a.short ? `<div class="pc-short">${esc(a.short)}</div>` : ''}
-        <div class="pc-tags">${a.cat?`<span class="tag">${esc(CAT_LABEL[a.cat] || a.cat)}</span>`:''}${a.free?'<span class="tag">Free</span>':''}${st?`<span class="tag">${esc(st)}</span>`:''}${a.morn?'<span class="tag">Before work</span>':''}${a.eve?'<span class="tag">After work</span>':''}${a.wknd?'<span class="tag">Weekend</span>':''}${a.check?'<span class="tag warnTag">Check hours</span>':''}</div>
-      </div>
-    </div>`; }).join('') || '<p class="muted">Nothing matches this filter.</p>';
+  const spots = sortSpots();
+  if (ui.sortFrom && !spots.some(s => s.id === ui.sortFrom)) ui.sortFrom = '';
+  const sortSel = spots.length ? `<select id="exSort" data-act="exSort" aria-label="Sort places">
+      <option value="">Sort: suggested order</option>${spots.map(s => `<option value="${s.id}" ${ui.sortFrom === s.id ? 'selected' : ''}>Nearest to ${esc(s.name)} (${esc(s.days)})</option>`).join('')}</select>`
+    : `<div class="muted exhint">Tip: set a "Working from" spot on a work day in Plan to sort places by distance from it.</div>`;
   setTimeout(loadCardPhotos, 0);
 
   return `<div class="filterbar"><div class="chips nowrap">${chips}</div>
       <button class="ghost filterbtn" data-act="openSheet" aria-label="Filters">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>Filters${nFilters ? `<span class="badge">${nFilters}</span>` : ''}</button></div>
     ${summary ? `<div class="muted" style="margin:0 4px 4px">${esc(summary)}</div>` : ''}
-    <div class="muted" style="margin:0 4px">${list.length} place${list.length===1?'':'s'} · tap one for the full page</div>
-    ${cards}
+    <div class="exsearch"><input id="exQ" type="search" enterkeyhint="search" autocomplete="off" placeholder="Search places, areas or things to do" value="${esc(ui.q || '')}" aria-label="Search places">${sortSel}</div>
+    <div id="exList">${exploreListHtml()}</div>
     <div class="card"><b>Add your own idea</b>
       <div class="grid2" style="margin-top:8px">
         <input id="newActName" placeholder="Name">
@@ -5577,6 +5609,11 @@ document.getElementById('main').addEventListener('click', e => {
 // Text boxes and dropdowns save when you finish typing / choose (without redrawing, so the keyboard stays open)
 document.getElementById('main').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'wfQ') { e.preventDefault(); workSearch(); } });
 document.getElementById('main').addEventListener('input', e => { if (e.target.id === 'wfQ') ui.wfQ = e.target.value; });
+// Explore search: redraw only the list, so the keyboard stays open
+document.getElementById('main').addEventListener('input', e => {
+  if (e.target.id !== 'exQ') return;
+  ui.q = e.target.value; const l = document.getElementById('exList'); if (l) { l.innerHTML = exploreListHtml(); loadCardPhotos(); }
+});
 document.getElementById('main').addEventListener('input', e => { const a = e.target.dataset.act; if (a === 'docField') docFieldInput(e.target); else if (a === 'emField') emFieldInput(e.target); });
 document.getElementById('main').addEventListener('change', e => {
   const t = e.target, a = t.dataset.act;
@@ -5591,6 +5628,7 @@ document.getElementById('main').addEventListener('change', e => {
   else if (a === 'setDayBudget') { const v = parseFloat(t.value); state.dayBudgets = state.dayBudgets || {};
     if (v >= 0) state.dayBudgets[t.dataset.v] = v; else delete state.dayBudgets[t.dataset.v]; save(); render(); }
   else if (a === 'expDate') { ui.expDate = t.value; render(); }
+  else if (a === 'exSort') { ui.sortFrom = t.value; render(); }
   else if (a === 'setNote') { state.notes[t.dataset.id] = t.value; save(); }
   else if (a === 'docFiles') { if (t.files.length) addDocFiles(t.dataset.id, Array.from(t.files)); t.value = ''; }
   else if (a === 'restoreFile') { if (t.files[0]) restoreBackup(t.files[0]); t.value = ''; }
