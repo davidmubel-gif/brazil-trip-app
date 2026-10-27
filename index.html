@@ -4354,6 +4354,65 @@ async function workSearch() {
   } catch (e) { ui.wfMsg = 'Could not search (no internet?). You can pick a place from Explore instead.'; }
   if (ui.workSheet) render();
 }
+/* ---- Calendar export: plan items and bookings as an .ics file, with reminders, for the phone's own calendar ---- */
+const icsEsc = s => String(s ?? '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+// local time to UTC; off = minutes behind UTC (Brazil 180 all year, as it has no daylight saving; Colombia 300)
+const icsMs = (iso, min, off = 180) => { const [y, mo, d] = iso.split('-').map(Number); return Date.UTC(y, mo - 1, d, 0, min + off); };
+const icsStamp = ms => new Date(ms).toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z';
+const icsFold = line => line.match(/.{1,60}/gu).join('\r\n ');   // calendar lines must stay short; continuation lines start with a space
+// startMs/endMs: exact times (UTC ms); otherwise iso + start + dur in Brazil time; allDay: a date only
+function icsEvent({uid, iso, start, dur, startMs, endMs, allDay, title, where, notes, alarms}) {
+  const out = ['BEGIN:VEVENT', 'UID:' + uid + '@brazil-trip-app', 'DTSTAMP:' + icsStamp(Date.now())];
+  if (allDay) { const n = new Date(iso + 'T12:00:00'); n.setDate(n.getDate() + 1);
+    out.push('DTSTART;VALUE=DATE:' + iso.replace(/-/g, ''), 'DTEND;VALUE=DATE:' + n.toISOString().slice(0, 10).replace(/-/g, '')); }
+  else { const s = startMs ?? icsMs(iso, start); out.push('DTSTART:' + icsStamp(s), 'DTEND:' + icsStamp(endMs ?? s + dur * 60e3)); }
+  out.push('SUMMARY:' + icsEsc(title));
+  if (where) out.push('LOCATION:' + icsEsc(where));
+  if (notes) out.push('DESCRIPTION:' + icsEsc(notes));
+  for (const [before, text] of alarms || []) out.push('BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:' + icsEsc(text), 'TRIGGER:-PT' + before + 'M', 'END:VALARM');
+  out.push('END:VEVENT');
+  return out;
+}
+// The timed plan items of a day (cancelled ones left out)
+function icsPlanEvents(iso) {
+  return planModel(iso).sched.map(r => {
+    const a = r.a, station = a && stationText(a);
+    const notes = [a && a.hoursShort ? 'Hours: ' + a.hoursShort : '', station ? 'Metro: ' + station : '', r.it.why ? 'Why this time: ' + r.it.why : '',
+      ...r.warns.map(w => 'Check: ' + w), r.status === 'booked' ? 'Booked' : 'Idea (not booked)'].filter(Boolean).join('\n');
+    return icsEvent({uid: 'plan-' + r.it.id, iso, start: r.start, dur: r.dur, title: r.name, where: a ? a.address : '', notes,
+      alarms: [[45, `${r.name} at ${fmtMin(r.start)}: time to head out`]]});
+  });
+}
+// Bookings with a date: flights, buses, check-ins, events and tours. Reminders depend on the kind.
+function icsBookingEvents(mos) {
+  return mos.map(mo => {
+    const d = mo.d, f = d.f || {}, t = d.type, start = mo.time ? toMin(mo.time) : null;
+    const dur = t === 'flight' ? 120 : t === 'event' || t === 'tour' ? 120 : 30;
+    // flights and buses: depart in the departure airport's time, arrive in the arrival's (next day if the clock time is earlier)
+    let startMs, endMs;
+    if (start !== null && (t === 'flight' || t === 'bus')) {
+      startMs = icsMs(mo.date, start, t === 'flight' ? airportOff(f.from) : 180);
+      if (f.arr) { endMs = icsMs(mo.date, toMin(f.arr), t === 'flight' ? airportOff(f.to) : 180); if (endMs <= startMs) endMs += 864e5; }
+    }
+    const alarms = t === 'flight' ? [[24 * 60, 'Online check-in usually opens about 24 h before'], [180, 'Leave for the airport soon']]
+      : t === 'bus' ? [[60, 'Leave for the bus station']] : mo.label === 'Check-out' ? [[60, 'Check-out soon']] : [[60, mo.label + ' in 1 hour']];
+    const code = d.conf ? `${docType(d).code || 'Code'}: ${d.conf}` : '';
+    const notes = [code, ...docFieldsText(d), d.notes].filter(Boolean).join('\n');
+    return icsEvent({uid: 'doc-' + d.id + '-' + mo.label.replace(/\W/g, ''), iso: mo.date, start, dur, startMs, endMs, allDay: start === null,
+      title: `${mo.label}: ${d.title}`, where: f.address || f.venue || f.meeting || f.from || '', notes, alarms: start === null ? [] : alarms});
+  });
+}
+const docFieldsText = d => docType(d).fields.filter(([k]) => d.f[k] && k !== 'link').map(([k, l]) => `${l}: ${d.f[k]}`);
+function icsFile(events) {
+  return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Brazil trip app//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'X-WR-CALNAME:Brazil trip',
+    ...events.flat(), 'END:VCALENDAR'].map(icsFold).join('\r\n') + '\r\n';
+}
+function exportCalendar(whole) {
+  const days = whole ? tripDays() : [ui.planDay];
+  const plan = days.flatMap(icsPlanEvents), bookings = icsBookingEvents(whole ? state.docs.flatMap(docMoments) : dayBookings(ui.planDay));
+  if (!plan.length && !bookings.length) { alert('Nothing with a time to add yet. Set start times in Plan, or dates on your bookings in Docs.'); return; }
+  saveFile(whole ? 'brazil-trip.ics' : `brazil-trip-${ui.planDay}.ics`, icsFile([...plan, ...bookings]), 'text/calendar');
+}
 // Every plan item that has this document attached, by date
 function docUses(id) {
   const out = [];
@@ -4702,6 +4761,11 @@ function renderPlan() {
       <button class="chip ${view === 'list' ? 'on' : ''}" data-act="planView" data-v="list">List by time</button></div>
     ${view === 'timeline' ? renderTimeline(m) : renderListView(m)}
     ${m.unsched.length ? `<button class="btn" style="width:100%" data-act="autoArrange">Suggest times for ${m.unsched.length} unscheduled</button><p class="muted">${m.wOn ? 'Fits around your work hours, opening hours and travel to and from work.' : 'Fits around opening hours and travel between stops.'} Each suggestion says why. Change any time you like.</p>` : ''}
+    <div class="card"><div class="row">${ic('cal')}<b class="grow">Add to your phone's calendar</b></div>
+      <div class="row" style="flex-wrap:wrap;margin-top:8px">
+        <button class="btn" data-act="icsDay">This day</button>
+        <button class="ghost" data-act="icsTrip">Whole trip + bookings</button></div>
+      <p class="muted" style="margin-bottom:0">Your phone's calendar then reminds you: 45 min before each plan item, the day before a flight for check-in, and an hour before buses, events and check-ins. Items without a start time are left out. Booking codes are included, so they also end up wherever your calendar syncs (Google or iCloud). If you export again after changes, delete the older copies in your calendar first, because some phones add them twice.</p></div>
     <h3 style="margin:14px 0 0">Items for this day</h3>
     ${ordered.map(itemCard).join('') || '<p class="muted">Nothing planned for this day yet. Add places from Explore or below.</p>'}
     <div class="card"><b>Add to this day</b>
@@ -4861,8 +4925,12 @@ function docMoments(d) {
     default: return [];   // passports and insurance have no "moment"
   }
 }
+// Times are Brazil time (UTC-3, no daylight saving), except flights from or to a Colombian airport (UTC-5)
+const COL_AIRPORTS = new Set(['BOG', 'MDE', 'CLO', 'CTG', 'BAQ', 'SMR', 'BGA', 'PEI', 'ADZ', 'CUC', 'EOH', 'MTR', 'LET', 'AXM', 'PSO', 'NVA', 'VUP', 'MZL', 'EYP', 'RCH']);
+const airportOff = code => COL_AIRPORTS.has(String(code || '').trim().toUpperCase().slice(0, 3)) ? 300 : 180;   // minutes behind UTC
+const momentOff = mo => mo.d && mo.d.type === 'flight' && mo.label === 'Flight departs' ? airportOff(mo.d.f.from) : 180;
 // milliseconds for a moment; a moment without a time counts until the end of its day
-const momentMs = mo => Date.parse(`${mo.date}T${mo.time || '23:59'}:00-03:00`);
+const momentMs = mo => Date.parse(`${mo.date}T${mo.time || '23:59'}:00${momentOff(mo) === 300 ? '-05:00' : '-03:00'}`);
 // "today at 19:00", "tomorrow at 07:35", "in 3 days", "in 45 min"
 function countdown(mo) {
   const now = Date.now(), ms = momentMs(mo), today = brazilToday();
@@ -5184,6 +5252,8 @@ const actions = {
   toggleWork: () => { (state.workOverride ||= {})[ui.planDay] = !workOn(ui.planDay); },
   autoArrange: () => { const left = autoArrange(ui.planDay);
     if (left.length) alert('Could not find a time for:\n' + left.map(x => `• ${x.name}: ${x.why}`).join('\n') + '\n\nTry another day, or set a time by hand.'); },
+  icsDay: () => { exportCalendar(false); return false; },
+  icsTrip: () => { exportCalendar(true); return false; },
   openWork: () => { ui.workSheet = true; ui.wfResults = []; ui.wfMsg = ''; },
   closeWork: () => { ui.workSheet = false; },
   wfSearch: () => { workSearch(); return false; },
