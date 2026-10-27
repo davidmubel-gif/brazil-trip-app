@@ -141,6 +141,8 @@
   .wxday { display:flex; gap:var(--s3); align-items:flex-start; font-size:14px; }
   .wxsun { display:flex; gap:var(--s2); align-items:flex-start; padding-right:var(--s3); border-right:1px solid var(--line); white-space:nowrap; }
   .wxsun .ri { color:var(--hi); }
+  .keepdata { display:flex; gap:var(--s2); align-items:flex-start; margin-top:var(--s3); padding-top:var(--s3); border-top:1px solid var(--line); font-size:13px; }
+  .keepdata .ri { color:var(--warn); flex:none; } .keepdata.ok .ri { color:var(--accent); }
   .why { font-size:13px; color:var(--muted); margin-top:6px; padding-left:var(--s2); border-left:3px solid var(--hi); }
   .ag-free { border:1px dashed var(--line); border-radius:12px; padding:8px 12px; color:var(--muted); font-size:13px; text-align:center; }
   .ag-card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:var(--s3) 14px; display:flex; flex-direction:column; gap:4px; }
@@ -4470,6 +4472,45 @@ function exportCalendar(whole) {
   if (!plan.length && !bookings.length) { alert('Nothing with a time to add yet. Set start times in Plan, or dates on your bookings in Docs.'); return; }
   saveFile(whole ? 'brazil-trip.ics' : `brazil-trip-${ui.planDay}.ics`, icsFile([...plan, ...bookings]), 'text/calendar');
 }
+/* ---- Share a day's plan as plain text (for someone at home): times, places, addresses, where you're staying. No booking codes. ---- */
+function dayShareText(iso) {
+  const m = planModel(iso), city = dayCity(iso), spot = m.wOn ? workSpot(iso) : null;
+  const stay = state.docs.find(d => d.type === 'stay' && d.f.checkIn && d.f.checkOut && d.f.checkIn <= iso && iso < d.f.checkOut);
+  const ev = m.sched.map(r => ({t: r.start, line: `${fmtMin(r.start)}–${fmtMin(r.end % 1440)} ${r.name}` +
+    (r.a ? [r.a.address ? ' · ' + r.a.address : '', r.a && cardStation(r.a) ? ` (${cardStation(r.a)})` : ''].join('') : '')}));
+  const spotAddr = spot && (spot.a.address || spot.q);
+  if (m.wOn) ev.push({t: m.ws, line: `${fmtMin(m.ws)}–${fmtMin(m.we)} Work${spot ? ' at ' + spot.name + (spotAddr && spotAddr !== spot.name ? ' · ' + spotAddr : '') : ''}`});
+  dayBookings(iso).filter(mo => mo.time).forEach(mo => ev.push({t: toMin(mo.time), line: `${mo.time} ${mo.label}: ${mo.d.title}`}));
+  ev.sort((x, y) => x.t - y.t);
+  const s = sunTimes(iso, city);
+  return [`My plan for ${dayLabel(iso)} (${city})`,
+    stay ? `Staying at: ${stay.title}${stay.f.address ? ', ' + stay.f.address : ''}` : null,
+    '', ...(ev.length ? ev.map(e => e.line) : ['Nothing with a time planned yet.']),
+    m.unsched.length ? `\nMaybe, no time yet: ${m.unsched.map(r => r.name).join(', ')}` : null,
+    `\nSunset ${fmtMin(s.set)}. Times are Brazil time (UTC-3).`].filter(x => x !== null).join('\n');
+}
+async function shareDay() {
+  const text = dayShareText(ui.planDay);
+  if (navigator.share) { try { await navigator.share({title: 'My plan for ' + dayLabel(ui.planDay), text}); return; } catch (e) { if (e.name === 'AbortError') return; } }
+  try { await navigator.clipboard.writeText(text); ui.shareMsg = 'Plan copied: paste it into WhatsApp or a text message.'; }
+  catch (e) { ui.shareMsg = "Couldn't open sharing or copy here."; }
+  render();
+}
+/* ---- Keeping your data: ask the browser not to clear this app's storage, and nudge for a backup near and during the trip ---- */
+const isInstalled = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+async function askPersist() {
+  try { if (!navigator.storage || !navigator.storage.persist) { ui.persisted = null; return; }
+    ui.persisted = await navigator.storage.persisted() || await navigator.storage.persist(); } catch (e) { ui.persisted = null; }
+}
+function backupNudge() {
+  const last = state.lastBackup, age = last ? Math.round((new Date(brazilToday()) - new Date(last)) / 864e5) : null, days = tripDays();
+  const hasData = state.expenses.length || Object.keys(state.plan).length || state.docs.some(d => d.conf);
+  const toStart = Math.round((new Date(days[0] + 'T12:00:00') - new Date(brazilToday() + 'T12:00:00')) / 864e5);
+  if (!hasData || (last && age <= 3) || toStart > 7 || brazilToday() > days[days.length - 1]) return '';
+  return `<div class="card warn irow nudge">${ic('warn')}<div class="grow"><b>${toStart > 0 ? 'Back up before you fly' : 'Back up your trip'}</b>
+    <div>${last ? `Last backup ${age} days ago.` : 'No backup yet.'} If this phone is lost or the browser clears its data, your plans, budget and documents go with it.</div>
+    <button class="btn" style="margin-top:var(--s2)" data-act="backup">Save backup now</button></div></div>`;
+}
 // Every plan item that has this document attached, by date
 function docUses(id) {
   const out = [];
@@ -4804,6 +4845,7 @@ function renderPlan() {
       <div><b>Sun, Nov 15</b> · Proclamação da República</div>
       <div><b>Fri, Nov 20</b> · Dia da Consciência Negra</div>
       <div class="muted">Nov 20 is still a work day for you. Hours may change on holidays, so check first.</div></div></div>
+    ${backupNudge()}
     <div class="chips nowrap" id="daychips">${chips}</div>
     <div class="row" style="padding:4px 0"><h2 class="grow" style="margin:6px 0">${dayLabel(iso)}</h2>
       <button class="ghost" data-act="toggleWork">${m.wOn ? 'Work day' : 'Day off'}</button></div>
@@ -4819,6 +4861,10 @@ function renderPlan() {
       <button class="chip ${view === 'list' ? 'on' : ''}" data-act="planView" data-v="list">List by time</button></div>
     ${view === 'timeline' ? renderTimeline(m) : renderListView(m)}
     ${m.unsched.length ? `<button class="btn" style="width:100%" data-act="autoArrange">Suggest times for ${m.unsched.length} unscheduled</button><p class="muted">${m.wOn ? 'Fits around your work hours, opening hours and travel to and from work.' : 'Fits around opening hours and travel between stops.'} Each suggestion says why. Change any time you like.</p>` : ''}
+    <div class="card"><div class="row">${ic('chat')}<b class="grow">Send this day to someone at home</b></div>
+      <div class="muted" style="margin-top:4px">Times, places, addresses and where you're staying, as a text message. No booking codes.</div>
+      ${ui.shareMsg ? `<div class="muted" role="status" style="margin-top:6px">${esc(ui.shareMsg)}</div>` : ''}
+      <button class="btn" style="margin-top:8px" data-act="shareDay">Share this day</button></div>
     <div class="card"><div class="row">${ic('cal')}<b class="grow">Add to your phone's calendar</b></div>
       <div class="row" style="flex-wrap:wrap;margin-top:8px">
         <button class="btn" data-act="icsDay">This day</button>
@@ -5163,6 +5209,9 @@ function renderBackupCard() {
       <label class="ghost" style="cursor:pointer">Restore from a backup<input type="file" accept=".json,application/json" hidden data-act="restoreFile"></label>
     </div>
     <div class="muted" style="margin-top:var(--s2)">On a phone this opens the share menu: save it to Files or Google Drive, or email it to yourself. Restoring replaces what's in the app now.</div>
+    <div class="keepdata ${ui.persisted ? 'ok' : ''}">${ic(ui.persisted ? 'shield' : 'warn')}<span>${ui.persisted
+      ? '<b>Kept on this phone.</b> The browser has agreed not to clear this app\'s data on its own. A backup still protects you if the phone is lost.'
+      : `<b>The browser may clear this app's data</b> if the phone runs low on space or the app isn't opened for a while.${isInstalled() ? '' : ' Add it to your home screen (Share → Add to Home Screen on iPhone; menu → Install app on Android), which makes this much less likely,'} and save backups.`}</span></div>
   </div>`;
 }
 // "Before you fly": every booking's checklist in one place, with progress; done items fold away
@@ -5245,7 +5294,7 @@ function renderDocs() {
       <div class="muted">Add your flights, stays, bus tickets and event tickets. Their codes, addresses and tickets are then one tap away, even offline.</div></div></div>`;
   const idAlerts = state.docs.filter(d => { const s = idStatus(d); return s && (s.level === 'bad' || s.level === 'warn'); })
     .map(d => `<button class="idstat ${idStatus(d).level} top" data-act="jumpDoc" data-id="${d.id}">${ic('warn')}<span><b>${esc(d.title)}</b> · ${esc(idStatus(d).msg)}</span></button>`).join('');
-  return idAlerts + renderEmergency() + renderNextUp() + renderBeforeFly() + filterChips + (cards || empty) + `<div class="card"><b>Add a booking or document</b>
+  return idAlerts + backupNudge() + renderEmergency() + renderNextUp() + renderBeforeFly() + filterChips + (cards || empty) + `<div class="card"><b>Add a booking or document</b>
       <div class="grid2" style="margin-top:var(--s2)">
         <label class="muted">Name<input id="newDoc" placeholder="Travel insurance"></label>
         <label class="muted">Type<select id="newDocType">${Object.entries(DOC_TYPES).map(([k, t]) => `<option value="${k}">${t.label}</option>`).join('')}</select></label>
@@ -5446,7 +5495,8 @@ const actions = {
   },
   delCash: t => { state.wallet = (state.wallet || []).filter(w => w.id !== t.dataset.id); },
   exportCsv: () => { saveFile(`brazil-trip-expenses-${brazilToday()}.csv`, expensesCsv(), 'text/csv'); return false; },
-  backup: () => { makeBackup(document.getElementById('bkPhotos').checked); return false; },
+  backup: () => { const p = document.getElementById('bkPhotos'); makeBackup(!!(p && p.checked)); return false; },
+  shareDay: () => { shareDay(); return false; },
   toggleCarry: () => { state.carry = !state.carry; },
   getRate: () => { if (!ui.rateBusy) fetchRate(); return false; },
   resetDayBudget: t => { if (state.dayBudgets) delete state.dayBudgets[t.dataset.v]; },
@@ -5557,6 +5607,7 @@ window.addEventListener('popstate', () => {
 });
 
 render();
+askPersist().then(() => { if (tab === 'docs') render(); });   // ask the browser to keep this app's data (no prompt in most browsers)
 
 /* ============ 4. OFFLINE MODE ============
    The service worker (sw.js) saves a copy of the app on your phone so it opens with no signal. */
