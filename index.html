@@ -149,6 +149,7 @@
   .more { color:var(--action); font-weight:600; white-space:nowrap; }
   .ag-leg { border-left:3px solid var(--accent); margin-left:6px; padding:2px 0 2px 14px; font-size:13px; }
   .ag-leg.metro { border-left:3px dotted var(--action); }
+  .ag-leg.ride { border-left:3px dotted var(--muted); }
   .ag-warn { display:flex; gap:8px; align-items:center; font-size:13px; font-weight:600; color:var(--warn); background:var(--warn-bg); border-radius:8px; padding:6px 10px; margin-top:4px; }
   .ag-warn .ri { width:16px; height:16px; margin:0; stroke:var(--warn); }
   .tag.okTag { background:var(--ok-bg); color:var(--ok-ink); }
@@ -840,7 +841,8 @@
   .stop b { display:block; line-height:1.25; }
   .leg { display:flex; flex-wrap:wrap; gap:4px var(--s3); align-items:center; margin-left:13px; padding:2px 0 2px 22px; border-left:3px solid var(--accent); font-size:14px; }
   .leg.metro { border-left-style:dashed; border-left-color:var(--action); }
-  .leg.none { border-left-style:dotted; border-left-color:var(--muted); }
+  .leg.none, .leg.ride { border-left-style:dotted; border-left-color:var(--muted); }
+  .legend i.lr { border-top:3px dotted #8a8a8a; }
   .leg > .ri { margin-top:0; }
   .leg > .ri.m { stroke:var(--action); }
   .leg .grow { padding:6px 0; }
@@ -3477,6 +3479,7 @@ const IC = {
   bag:'<path d="M5 8h14l-1 13H6z"/><path d="M9 8V6a3 3 0 016 0v2"/>',
   music:'<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
   dots:'<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>',
+  car:'<path d="M5 16V11l2-5h10l2 5v5z"/><path d="M5 11h14"/><circle cx="8" cy="16" r="1.6"/><circle cx="16" cy="16" r="1.6"/>',
   walk:'<circle cx="13" cy="4.5" r="1.8"/><path d="M9 20l3-6-2-3 1-4 3 3 3 1M11 8l-3 3M12 14l3 3 1 4"/>',
   ext:'<path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/>'
 };
@@ -4153,31 +4156,54 @@ function planModel(iso) {
       else if (oh.known && !oh.air && ((r.start < oh.open && !(early !== null && r.start >= early)) || r.end > oh.close))
         r.warns.push(`Outside opening hours (${fmtMin(oh.open)}–${fmtMin(oh.close % 1440)})`);
       else if (!oh.known && r.start >= 18 * 60 && r.a.eve === false) r.warns.push('May be closed in the evening');
+      if (r.end >= 20 * 60 && !metroOpen(r.a.city, iso, r.end))
+        r.warns.push(`Ends after the metro closes (about ${metroClose(r.a.city, iso) === 24 * 60 ? 'midnight' : fmtMin(metroClose(r.a.city, iso))}): plan a ride-hail home`);
     }
   });
   return {rows, sched, unsched: rows.filter(r => r.start === null), cancelled: all.filter(r => r.status === 'cancelled'), ws, we, wOn};
 }
-// Travel minutes between two places (by id): a walk up to WALK_MAX_MIN, else a rough metro time. null if a pin is missing.
-function travelBetween(idA, idB) {
+/* ---- Metro hours and rush hour ----
+   Approximate: São Paulo runs about 4:40 to midnight every day (a Saturday-night 24-hour trial covers Lines 1, 2, 3 and 15 only);
+   Rio runs 7:00–23:00 on Sundays and holidays, and is taken as 5:00 to midnight on other days. Rush: weekdays about 6–9 and 16–19. */
+const cityAt = c => c && c.lng > -44.5 ? 'Rio de Janeiro' : 'São Paulo';
+function metroHours(city, iso) {
+  const sun = new Date(iso + 'T12:00:00').getDay() === 0 || HOLIDAYS.includes(iso);
+  return city === 'Rio de Janeiro' ? (sun ? [7 * 60, 23 * 60] : [5 * 60, 24 * 60]) : [4 * 60 + 40, 24 * 60];
+}
+const metroClose = (city, iso) => metroHours(city, iso)[1];
+function metroOpen(city, iso, t) {
+  const [o, c] = metroHours(city, iso);
+  return t >= o && t <= c - 15;   // leave at least 15 min before closing to still catch a train
+}
+const isRush = (iso, t) => !isWeekend(iso) && !HOLIDAYS.includes(iso) && ((t >= 6 * 60 && t < 9 * 60) || (t >= 16 * 60 && t < 19 * 60));
+const RUSH_EXTRA = 10;   // minutes added to metro trips in rush hour (packed trains, queues at the gates)
+const rideMin = km => Math.round(8 + km * 1.3 / 25 * 60);   // ride-hail: ~8 min to arrive, then ~25 km/h through streets
+// Travel minutes between two places (by id), leaving at minute dep of day iso: a walk up to WALK_MAX_MIN,
+// else the metro (with extra time in rush hour), or a ride-hail when the metro is closed. null if a pin is missing.
+function travelBetween(idA, idB, dep, iso) {
   if (!idA || !idB) return null;
   if (idA === idB) return {min: 0, how: 'walk'};
   const co = coordsLoad(), p = co[idA], q = co[idB]; if (!p || !q) return null;
   const d = distKm(p, q), r = routesLoad()[idA + '|' + idB], walk = r ? r.min : Math.round(d * 1.3 / 4.5 * 60);
-  return walk <= WALK_MAX_MIN ? {min: walk, how: 'walk'} : {min: Math.round(15 + d * 2.5), how: 'metro'};   // ~15 min to the platform, then ~24 km/h
+  if (walk <= WALK_MAX_MIN) return {min: walk, how: 'walk'};
+  if (dep != null && !metroOpen(cityAt(p), iso, dep)) return {min: rideMin(d), how: 'ride'};
+  const rush = dep != null && isRush(iso, dep);
+  return {min: Math.round(15 + d * 2.5) + (rush ? RUSH_EXTRA : 0), how: 'metro', rush};   // ~15 min to the platform, then ~24 km/h
 }
-const travelText = t => ({walk: `${t.min} min walk`, metro: `~${t.min} min by metro`, nowork: 'about 30 min (set "Working from" for a real estimate)'}[t.how] || `about ${t.min} min`);
+const travelText = t => ({walk: `${t.min} min walk`, metro: `~${t.min} min by metro${t.rush ? ' (rush hour)' : ''}`, ride: `~${t.min} min by ride-hail (metro closed by then)`,
+  nowork: 'about 30 min (set "Working from" for a real estimate)'}[t.how] || `about ${t.min} min`);
 // "Suggest times": places unscheduled items around work, opening hours and travel, and notes why on each one.
 // Returns the items it could not fit, each with the reason.
 function autoArrange(iso) {
   const m = planModel(iso), spot = m.wOn ? workSpot(iso) : null;
   const busy = m.sched.map(r => ({s: r.start, e: r.end, id: r.a ? r.a.id : null, name: r.name}));
   if (m.wOn) busy.push({s: m.ws, e: m.we, id: spot ? spot.a.id : null, work: true, name: 'work'});
-  const hop = (b, id) => (b.work && !b.id ? {min: 30, how: 'nowork'} : travelBetween(b.id, id)) || {min: 20, how: 'guess'};
+  const hop = (b, id, dep) => (b.work && !b.id ? {min: 30 + (isRush(iso, dep) ? RUSH_EXTRA : 0), how: 'nowork'} : travelBetween(b.id, id, dep, iso)) || {min: 20, how: 'guess'};
   // c..c+dur must be free, with time to travel from the block before and to the block after
   const fits = (c, dur, id) => {
     if (busy.some(b => c < b.e && c + dur > b.s)) return null;
     const before = busy.filter(b => b.e <= c).sort((x, y) => y.e - x.e)[0], after = busy.filter(b => b.s >= c + dur).sort((x, y) => x.s - y.s)[0];
-    const tIn = before && hop(before, id), tOut = after && hop(after, id);
+    const tIn = before && hop(before, id, before.e), tOut = after && hop(after, id, c + dur);
     if (before && c < before.e + tIn.min) return null;
     if (after && c + dur + tOut.min > after.s) return null;
     return {before, tIn, after, tOut};
@@ -4354,11 +4380,13 @@ function suggestDoc(it, iso) {
     && bkWords([d.title, d.f.venue, d.f.company, d.f.meeting, d.f.to].filter(Boolean).join(' ')).some(w => mine.some(m => m.startsWith(w) || w.startsWith(m))));
 }
 function fmtDur(min) { const h = Math.floor(min / 60), m = min % 60; return (h ? h + ' h' : '') + (h && m ? ' ' : '') + (m ? m + ' min' : ''); }
+// A and B are plan rows (or {a, end}); the leg leaves A at A.end
 function legLine(A, B) {
-  const L = legData({a: A.a}, {a: B.a}, coordsLoad(), routesLoad());
+  const L = legData({a: A.a, dep: A.end}, {a: B.a}, coordsLoad(), routesLoad());
   if (L.kind === 'walk') return `<div class="ag-leg"><b>Walk ${L.min} min</b> · ${fmtDist(L.km)}</div>`;
+  if (L.kind === 'ride') return `<div class="ag-leg ride"><b>Ride-hail</b> · ~${L.rideMin} min <span class="muted">(the metro is closed by then)</span></div>`;
   if (L.kind === 'metro') { const x = cardStation(A.a).replace('Metro ', ''), y = cardStation(B.a).replace('Metro ', '');
-    return `<div class="ag-leg metro"><b>Metro</b>${x && y ? ` · ${esc(x)} to ${esc(y)}` : ''} <span class="muted">(walk would be ~${L.min} min)</span></div>`; }
+    return `<div class="ag-leg metro"><b>Metro</b>${x && y ? ` · ${esc(x)} to ${esc(y)}` : ''}${L.rush ? ' · <b>rush hour</b>, allow ~10 min extra' : ''} <span class="muted">(walk would be ~${L.min} min)</span></div>`; }
   if (L.kind === 'far') return `<div class="ag-leg metro"><b>Different cities</b> · see your bus plans</div>`;
   return '';
 }
@@ -4381,12 +4409,12 @@ function renderTimeline(m) {
     }
     if (prev && x.t - prev.e >= 30) html += `<div class="ag-row"><div class="ag-t"></div><div class="ag-c"><div class="ag-free">Free · ${fmtDur(x.t - prev.e)}</div></div></div>`;
     if (x.work) {
-      const fromItem = spot && prev && prev.r && prev.r.a ? prev.r : null;
+      const fromItem = spot && prev && prev.r && prev.r.a ? Object.assign({}, prev.r, {end: prev.e}) : null;
       html += `<div class="ag-row"><div class="ag-t">${fmtMin(x.t)}</div><div class="ag-c">${fromItem ? legLine(fromItem, {a: spot.a}) : ''}
         <button class="ag-work" data-act="openWork" aria-label="Change where you work"><b>Work${spot ? ' · ' + esc(spot.name) : ''}</b><span>${fmtMin(m.ws)} to ${fmtMin(m.we)}</span></button></div></div>`;
     } else {
       // after the work block, the leg starts at the work spot (with no work spot there is no leg across work)
-      const r = x.r, prevItem = prev && prev.work ? (spot ? {a: spot.a} : null) : prev && prev.r ? prev.r : null;
+      const r = x.r, prevItem = prev && prev.work ? (spot ? {a: spot.a, end: m.we} : null) : prev && prev.r ? prev.r : null;
       const tag = r.status === 'booked' ? '<span class="tag okTag">Booked</span>' : '<span class="tag">Idea</span>';
       html += `<div class="ag-row"><div class="ag-t">${fmtMin(r.start)}</div><div class="ag-c">
         ${prevItem && prevItem.a && r.a ? legLine(prevItem, r) : ''}
@@ -4459,10 +4487,10 @@ function gmapsDir(origin, dest, mode, waypoints) {
 // with no work spot, the last morning stop gets gapAfter, so no leg is drawn straight across the work hours.
 function dayStops() {
   const iso = ui.planDay, m = planModel(iso), spot = m.wOn ? workSpot(iso) : null;
-  let list = m.sched.filter(r => r.a).map(r => ({a: r.a, q: placeQuery(r.a), start: r.start}));
+  let list = m.sched.filter(r => r.a).map(r => ({a: r.a, q: placeQuery(r.a), start: r.start, dep: r.end}));
   if (m.wOn) {
     const before = list.filter(s => s.start < m.ws), after = list.filter(s => s.start >= m.ws);
-    if (spot) list = before.concat({a: spot.a, q: spot.q, start: m.ws, end: m.we, work: true}, after);
+    if (spot) list = before.concat({a: spot.a, q: spot.q, start: m.ws, end: m.we, dep: m.we, work: true}, after);
     else if (before.length && after.length) before[before.length - 1].gapAfter = true;
   }
   list = list.concat(m.unsched.filter(r => r.a).map(r => ({a: r.a, q: placeQuery(r.a), start: null})));
@@ -4497,7 +4525,13 @@ function legData(A, B, co, rt) {
   const r = rt[A.a.id + '|' + B.a.id];
   // estimate until the real route is fetched: streets add ~30% to the straight line; the route service walks at 4.5 km/h
   const km = r ? r.km : d * 1.3, min = r ? r.min : Math.round(d * 1.3 / 4.5 * 60);
-  return {kind: min <= WALK_MAX_MIN ? 'walk' : 'metro', km, min, route: r, exact: !!r};
+  const L = {kind: min <= WALK_MAX_MIN ? 'walk' : 'metro', km, min, route: r, exact: !!r};
+  // leaving A at a known time (A.dep): ride-hail when the metro is closed, extra time in rush hour
+  if (L.kind === 'metro' && A.dep != null) {
+    if (!metroOpen(cityAt(ca), ui.planDay, A.dep)) return Object.assign(L, {kind: 'ride', rideMin: rideMin(d)});
+    if (isRush(ui.planDay, A.dep)) L.rush = true;
+  }
+  return L;
 }
 function stationText(a) {
   const t = a.transit; if (!t || !t.station) return null;
@@ -4533,7 +4567,11 @@ function legsHtml() {
     else if (L.kind === 'metro') {
       const sa = stationText(A.a), sb = stationText(B.a); cls += ' metro';
       body = `${ic('train', 'ri m')}<div class="grow"><b>Metro</b>${sa && sb ? ` · ${esc(sa)} to ${esc(sb)}` : ' · check the stations in Google Maps'}
-        <div class="muted">Walking would take about ${L.min} min</div></div>`;
+        ${L.rush ? '<div><b>Rush hour</b>: packed trains, allow about 10 min extra</div>' : ''}<div class="muted">Walking would take about ${L.min} min</div></div>`;
+    } else if (L.kind === 'ride') {
+      cls += ' ride';
+      body = `${ic('car', 'ri m')}<div class="grow"><b>Ride-hail</b> · about ${L.rideMin} min by car
+        <div class="muted">The metro is closed by ${fmtMin(A.dep % 1440)}. Book an Uber or 99 from inside the venue.</div></div>`;
     } else {
       cls += ' none';
       const msg = {far: 'Different cities: see your bus plans.', nopin: 'No fixed address (it depends on the day): use Google Maps once you know where.'}[L.kind]
@@ -4549,7 +4587,7 @@ function renderDayMap() {
   if (!dayStops().length) return `<div class="card emptymap">${ic('pin')}<div><b>No stops yet</b>
     <div class="muted">Add places to this day and a map of the route appears here.</div></div></div>`;
   return `<div class="daymap"><div id="map" aria-label="Map of this day's stops"></div>
-      <div class="legend" aria-hidden="true"><span><i></i>Walk</span><span><i class="lm"></i>Metro</span></div></div>
+      <div class="legend" aria-hidden="true"><span><i></i>Walk</span><span><i class="lm"></i>Metro</span>${dayStops().some((s, i, all) => all[i + 1] && legData(s, all[i + 1], coordsLoad(), routesLoad()).kind === 'ride') ? '<span><i class="lr"></i>Ride-hail</span>' : ''}</div></div>
     <div id="mapStatus" class="muted mapstatus" aria-live="polite"></div>`;
 }
 // Plan day, under the map: stops and legs, and the one main button
@@ -4579,6 +4617,8 @@ function drawMap(map) {
       L.polyline([[ca.lat, ca.lng], [cb.lat, cb.lng]], {color: teal, weight: 4, opacity: .5}).addTo(mapLayer);
     } else if (L2.kind === 'metro') {
       L.polyline([[ca.lat, ca.lng], [cb.lat, cb.lng]], {color: orange, weight: 4, dashArray: '8 8'}).addTo(mapLayer);
+    } else if (L2.kind === 'ride') {
+      L.polyline([[ca.lat, ca.lng], [cb.lat, cb.lng]], {color: '#8a8a8a', weight: 4, dashArray: '2 8'}).addTo(mapLayer);
     }
   }
   stops.forEach(s => {
