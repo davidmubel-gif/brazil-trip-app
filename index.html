@@ -139,6 +139,10 @@
   .ag-card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:var(--s3) 14px; display:flex; flex-direction:column; gap:4px; }
   .ag-card.bad { border-color:var(--warn); }
   .ag-card.done b { text-decoration:line-through; color:var(--muted); }
+  .ag-card[data-act] { cursor:pointer; }
+  .ag-card[data-act]:active, .pname:active { background:var(--bg); }
+  .pname { display:block; width:100%; padding:0; border:0; background:none; color:inherit; font:inherit; text-align:left; cursor:pointer; border-radius:8px; }
+  .more { color:var(--action); font-weight:600; white-space:nowrap; }
   .ag-leg { border-left:3px solid var(--accent); margin-left:6px; padding:2px 0 2px 14px; font-size:13px; }
   .ag-leg.metro { border-left:3px dotted var(--action); }
   .ag-warn { display:flex; gap:8px; align-items:center; font-size:13px; font-weight:600; color:var(--warn); background:var(--warn-bg); border-radius:8px; padding:6px 10px; margin-top:4px; }
@@ -4117,7 +4121,8 @@ function itemCard(r) {
   return `<div class="card ${it.done ? 'done' : ''} ${st === 'cancelled' ? 'cancelled' : ''}">
     <div class="row">
       <input type="checkbox" ${it.done ? 'checked' : ''} data-act="toggleDone" data-id="${it.id}" aria-label="Done: ${esc(r.name)}">
-      <div class="grow t"><b>${esc(r.name)}</b>${a ? `<div class="muted">${esc(a.city)}${a.hoursShort ? ' · ' + esc(a.hoursShort) : ''}</div>` : ''}</div>
+      <div class="grow t">${a ? `<button class="pname" data-act="openPlace" data-id="${a.id}" aria-label="Open the place page for ${esc(r.name)}"><b>${esc(r.name)}</b> <span class="more">Info ›</span>
+        <div class="muted">${esc(a.city)}${a.hoursShort ? ' · ' + esc(a.hoursShort) : ''}</div></button>` : `<b>${esc(r.name)}</b>`}</div>
       <button class="x" data-act="delPlan" data-id="${it.id}" aria-label="Remove ${esc(r.name)} from this day">×</button></div>
     <button class="timebtn" data-act="openTime" data-id="${it.id}" aria-label="Change time for ${esc(r.name)}">${ic('clock')}
       <span class="grow">${r.start !== null ? `<b>${fmtMin(r.start)} – ${fmtMin(r.end % 1440)}</b>` : '<b>No time yet</b>'}<span class="muted"> · ${fmtDur(r.dur)}</span></span>
@@ -4236,8 +4241,8 @@ function renderTimeline(m) {
       const tag = r.status === 'booked' ? '<span class="tag okTag">Booked</span>' : '<span class="tag">Idea</span>';
       html += `<div class="ag-row"><div class="ag-t">${fmtMin(r.start)}</div><div class="ag-c">
         ${prevItem && r.a ? legLine(prevItem, r) : ''}
-        <div class="ag-card ${r.warns.length ? 'bad' : ''} ${r.it.done ? 'done' : ''}">
-          <div class="row"><b class="grow">${esc(r.name)}</b>${r.it.done ? '<span class="tag okTag">Done</span>' : tag}</div>
+        <div class="ag-card ${r.warns.length ? 'bad' : ''} ${r.it.done ? 'done' : ''}"${r.a ? ` data-act="openPlace" data-id="${r.a.id}" role="button" tabindex="0" aria-label="Open the place page for ${esc(r.name)}"` : ''}>
+          <div class="row"><b class="grow">${esc(r.name)}</b>${r.it.done ? '<span class="tag okTag">Done</span>' : tag}${r.a ? '<span class="more">›</span>' : ''}</div>
           <div class="muted">${fmtMin(r.start)} to ${fmtMin(r.end % 1440)} · ${fmtDur(r.dur)}${r.a && cardStation(r.a) ? ' · ' + esc(cardStation(r.a)) : ''}</div>
           ${docChip(r.it)}
           ${r.warns.map(w => `<div class="ag-warn">${ic('warn')}<span>${esc(w)}</span></div>`).join('')}
@@ -4926,7 +4931,7 @@ function render() {
   if (tab === 'plan' || tab === 'budget') { const c = document.querySelector('#daychips .chip.on'), row = document.getElementById('daychips');
     if (c && row) row.scrollLeft = c.offsetLeft - row.offsetLeft - (row.clientWidth - c.offsetWidth) / 2; }
   if (tab === 'plan' && document.getElementById('map')) initMap(); else if (leafMap) { try { leafMap.remove(); } catch (e) {} leafMap = null; }
-  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === (ui.backTo ? ui.backTo.tab : tab)));
   const days = tripDays();
   const titles = {explore:'Explore', budget:'Budget', plan:'Plan', docs:'Docs'};
   document.getElementById('title').textContent = titles[tab];
@@ -4942,7 +4947,7 @@ function render() {
 document.getElementById('nav').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   tab = b.dataset.tab;
-  if (ui.detail) { ui.detail = null; history.back(); }
+  if (ui.detail) { ui.detail = null; ui.backTo = null; history.back(); }
   if (ui.docPage) { ui.docPage = null; history.back(); }
   render(); window.scrollTo(0, 0);
 });
@@ -4981,6 +4986,8 @@ const actions = {
   mode: t => { ui.mode = t.dataset.v; },
   cat: t => { ui.cat = t.dataset.v; },
   open: t => { ui.scroll = window.scrollY; ui.detail = t.dataset.id; history.pushState({d:1}, ''); window.scrollTo(0, 0); },
+  // from a Plan item: show its place page, and remember the Plan spot so Back returns there
+  openPlace: t => { ui.backTo = {tab, scroll: window.scrollY}; tab = 'explore'; ui.detail = t.dataset.id; history.pushState({d:1}, ''); window.scrollTo(0, 0); },
   back: () => { history.back(); return false; },
   copyAddr: t => {
     const a = actById(t.dataset.id); if (!a || !a.address) return false;
@@ -5191,7 +5198,11 @@ document.getElementById('main').addEventListener('change', e => {
   else if (a === 'addPhotos') { addPhotos(Array.from(t.files)); t.value = ''; }
 });
 
-window.addEventListener('popstate', () => { ui.detail = null; ui.docPage = null; render(); window.scrollTo(0, ui.scroll || 0); });
+window.addEventListener('popstate', () => {
+  ui.detail = null; ui.docPage = null;
+  if (ui.backTo) { tab = ui.backTo.tab; ui.scroll = ui.backTo.scroll; ui.backTo = null; }
+  render(); window.scrollTo(0, ui.scroll || 0);
+});
 
 render();
 
