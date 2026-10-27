@@ -138,6 +138,9 @@
   .wfrom { display:flex; align-items:center; gap:var(--s3); width:100%; font:inherit; color:var(--ink); text-align:left; cursor:pointer; }
   .wres { display:block; width:100%; padding:var(--s2) var(--s3); margin-top:6px; border:1px solid var(--line); border-radius:12px; background:var(--bg); color:var(--ink); font:inherit; text-align:left; cursor:pointer; }
   .wres .muted { font-size:12px; }
+  .wxday { display:flex; gap:var(--s3); align-items:flex-start; font-size:14px; }
+  .wxsun { display:flex; gap:var(--s2); align-items:flex-start; padding-right:var(--s3); border-right:1px solid var(--line); white-space:nowrap; }
+  .wxsun .ri { color:var(--hi); }
   .why { font-size:13px; color:var(--muted); margin-top:6px; padding-left:var(--s2); border-left:3px solid var(--hi); }
   .ag-free { border:1px dashed var(--line); border-radius:12px; padding:8px 12px; color:var(--muted); font-size:13px; text-align:center; }
   .ag-card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:var(--s3) 14px; display:flex; flex-direction:column; gap:4px; }
@@ -3479,6 +3482,7 @@ const IC = {
   bag:'<path d="M5 8h14l-1 13H6z"/><path d="M9 8V6a3 3 0 016 0v2"/>',
   music:'<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
   dots:'<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>',
+  sun:'<circle cx="12" cy="13" r="4"/><path d="M12 4v2M5.6 6.6l1.4 1.4M18.4 6.6L17 8M3 13h2M19 13h2M3 19h18"/>',
   car:'<path d="M5 16V11l2-5h10l2 5v5z"/><path d="M5 11h14"/><circle cx="8" cy="16" r="1.6"/><circle cx="16" cy="16" r="1.6"/>',
   walk:'<circle cx="13" cy="4.5" r="1.8"/><path d="M9 20l3-6-2-3 1-4 3 3 3 1M11 8l-3 3M12 14l3 3 1 4"/>',
   ext:'<path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/>'
@@ -3517,6 +3521,7 @@ function renderDetail(a) {
     <div class="muted">${esc(a.area ? a.area + ' · ' : '')}${esc(a.city)}</div>
     <div class="pc-tags" style="margin:8px 0">${a.cat?`<span class="tag">${esc(CAT_LABEL[a.cat] || a.cat)}</span>`:''}${a.free?'<span class="tag">Free</span>':''}${a.morn?'<span class="tag">Before work</span>':''}${a.eve?'<span class="tag">After work</span>':''}${a.wknd?'<span class="tag">Weekend</span>':''}</div>
     ${a.morn && BEFORE_WORK[a.id] ? `<div class="muted" style="margin:-2px 0 8px">Before work: ${esc(BEFORE_WORK[a.id])}</div>` : ''}
+    ${SUNSET_SPOTS.has(a.id) ? (t => `<div class="muted irow" style="margin:-2px 0 8px">${ic('sun')}<span>Sunset during your trip: about ${fmtMin(Math.min(...t))}–${fmtMin(Math.max(...t))}. Arrive 30–40 min before.</span></div>`)(tripDays().map(d => sunTimes(d, a.city).set)) : ''}
     ${msg}
     ${a.check ? `<div class="card warn irow" style="margin:12px 0">${ic('warn')}<div>${esc(a.check)}</div></div>` : ''}
     ${a.short ? `<p style="margin:12px 0">${esc(a.short)}</p>` : ''}
@@ -4133,6 +4138,52 @@ function openingFor(a, iso) {
   const named = (a.hours || []).some(h => new RegExp('\\b' + ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][dow] + '[a-z]*day', 'i').test(h));
   return sawDays && !vague && !named ? {closed: true, known: true} : {known: false};
 }
+/* ---- Sunset (worked out offline) and the weather forecast (online, from Open-Meteo) ---- */
+const CITY_LL = {'São Paulo': [-23.5505, -46.6333], 'Rio de Janeiro': [-22.9068, -43.1729]};
+const SUNSET_SPOTS = new Set(['porsol', 'arpoador', 'terraco', 'pao', 'urca']);   // places best visited at sunset
+// Sunrise and sunset in local minutes (NOAA's formula; within a minute or two). Brazil time is UTC-3 all year.
+function sunTimes(iso, city) {
+  const [lat, lng] = CITY_LL[city] || CITY_LL['São Paulo'], rad = Math.PI / 180;
+  const n = Math.round((Date.parse(iso + 'T12:00:00Z') - Date.UTC(+iso.slice(0, 4), 0, 1)) / 864e5) + 1, g = 2 * Math.PI / 365 * (n - 1);
+  const eq = 229.18 * (0.000075 + 0.001868 * Math.cos(g) - 0.032077 * Math.sin(g) - 0.014615 * Math.cos(2 * g) - 0.040849 * Math.sin(2 * g));
+  const decl = 0.006918 - 0.399912 * Math.cos(g) + 0.070257 * Math.sin(g) - 0.006758 * Math.cos(2 * g) + 0.000907 * Math.sin(2 * g) - 0.002697 * Math.cos(3 * g) + 0.00148 * Math.sin(3 * g);
+  const ha = Math.acos(Math.cos(90.833 * rad) / (Math.cos(lat * rad) * Math.cos(decl)) - Math.tan(lat * rad) * Math.tan(decl)) / rad;
+  return {rise: Math.round(720 - 4 * (lng + ha) - eq - 180), set: Math.round(720 - 4 * (lng - ha) - eq - 180)};
+}
+const WX_KEY = 'trip-weather-v1', WX_DAYS = 16;   // Open-Meteo forecasts about 16 days ahead
+function wxLoad() { try { return JSON.parse(localStorage.getItem(WX_KEY)) || null; } catch (e) { return null; } }
+// Fetch the forecast for both cities (only their coordinates are sent). Re-checks at most every 3 hours.
+let wxBusy = false;
+async function wxRefresh() {
+  const c = wxLoad(), days = tripDays(), soon = new Date(days[0] + 'T12:00:00') - new Date(brazilToday() + 'T12:00:00') <= (WX_DAYS - 1) * 864e5;
+  if (wxBusy || !navigator.onLine || !soon || brazilToday() > days[days.length - 1] || (c && Date.now() - c.at < 3 * 3600e3)) return;
+  wxBusy = true;
+  try {
+    const cities = Object.keys(CITY_LL), ll = cities.map(k => CITY_LL[k]);
+    const u = `https://api.open-meteo.com/v1/forecast?latitude=${ll.map(x => x[0]).join(',')}&longitude=${ll.map(x => x[1]).join(',')}` +
+      `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=America%2FSao_Paulo&forecast_days=${WX_DAYS}`;
+    let j = await fetchT(u, 'json', {}, 15000); if (!Array.isArray(j)) j = [j];
+    const out = {at: Date.now(), city: {}};
+    cities.forEach((k, i) => { const d = j[i].daily; out.city[k] = {};
+      d.time.forEach((t, x) => { out.city[k][t] = {code: d.weather_code[x], hi: d.temperature_2m_max[x], lo: d.temperature_2m_min[x], rain: d.precipitation_probability_max[x]}; }); });
+    localStorage.setItem(WX_KEY, JSON.stringify(out));
+    if (tab === 'plan' && !ui.timeSheet && !ui.workSheet && !ui.docSheet) render();
+  } catch (e) {} finally { wxBusy = false; }
+}
+function wxText(code) {
+  return code === 0 ? 'Clear' : code <= 2 ? 'Partly cloudy' : code === 3 ? 'Cloudy' : code <= 48 ? 'Fog' : code <= 57 ? 'Drizzle' : code <= 67 ? 'Rain'
+    : code <= 77 ? 'Snow' : code <= 82 ? 'Showers' : 'Thunderstorms';
+}
+// Plan day strip: sunset (always) and the forecast (once it is available)
+function renderDayWx(iso) {
+  const city = dayCity(iso), s = sunTimes(iso, city), c = wxLoad(), w = c && c.city[city] && c.city[city][iso];
+  const short = city === 'Rio de Janeiro' ? 'Rio' : 'SP';
+  const first = new Date(tripDays()[0] + 'T12:00:00'); first.setDate(first.getDate() - (WX_DAYS - 1));
+  const wx = w ? `<b>${wxText(w.code)}</b> · ${Math.round(w.lo)}–${Math.round(w.hi)}°C${w.rain != null ? ` · rain ${w.rain}%` : ''}${w.rain >= 60 ? ' · <b>take an umbrella</b>' : ''}
+      <div class="muted">Forecast from Open-Meteo, updated ${new Date(c.at).toLocaleString('en-GB', {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo'})}</div>`
+    : `<span class="muted">Forecast shows here from about ${first.toLocaleDateString('en-US', {month: 'short', day: 'numeric'})}, when you're online</span>`;
+  return `<div class="card wxday"><div class="wxsun">${ic('sun')}<div><b>Sunset ${fmtMin(s.set)}</b><div class="muted">${short} · sunrise ${fmtMin(s.rise)}</div></div></div><div class="grow">${wx}</div></div>`;
+}
 // Before-work places: the early opening time from their note ("park opens at 5:00")
 function earlyOpen(a) { const x = (BEFORE_WORK[a.id] || '').match(/(\d{1,2}):(\d{2})/); return x ? +x[1] * 60 + +x[2] : null; }
 function planModel(iso) {
@@ -4230,12 +4281,18 @@ function autoArrange(iso) {
       const short = dur < r.dur ? `. Shortened to ${fmtDur(dur)} to fit before closing` : '';
       if (short) r.it.dur = dur;
       const prevTxt = f.before && !f.before.work ? `; ${travelText(f.tIn)} from ${f.before.name}` : '';
+      const sunTxt = !a || !SUNSET_SPOTS.has(a.id) ? '' : c <= sunset - 20 && c + dur >= sunset ? `. Timed for sunset at ${fmtMin(sunset)}`
+        : c > sunset - 20 ? `. Sunset is at ${fmtMin(sunset)}, so you'll miss it this day` : '';
       r.it.why = (w.k === 'morn' ? `Before work: ${a ? BEFORE_WORK[a.id] : 'free time'}; then ${f.after && f.after.work ? travelText(f.tOut) + ' to work' : 'on to your next stop'}`
         : w.k === 'eve' ? `${night ? 'Night out' : 'After work'}: ${f.before && f.before.work ? travelText(f.tIn) + ' from work' : 'after ' + (f.before ? f.before.name : 'work')}; ${hrs}`
-        : `${offLabel}${night ? ', night out' : ''}: ${hrs}${prevTxt}`) + short;
+        : `${offLabel}${night ? ', night out' : ''}: ${hrs}${prevTxt}`) + sunTxt + short;
     };
     // mornings fill from the end, so you aren't up at 6:00 for nothing; other windows fill from the start
-    const starts = (w, dur) => { const xs = []; for (let c = Math.ceil(w.s / 15) * 15; c + dur <= w.e && c <= (w.k === 'morn' ? LATE : lastStart); c += 15) xs.push(c); return w.k === 'morn' ? xs.reverse() : xs; };
+    // sunset spots try ~45 min before sunset first
+    const sunset = sunTimes(iso, a ? a.city : dayCity(iso)).set, sunAt = Math.round((sunset - 45) / 15) * 15;
+    const starts = (w, dur) => { const xs = []; for (let c = Math.ceil(w.s / 15) * 15; c + dur <= w.e && c <= (w.k === 'morn' ? LATE : lastStart); c += 15) xs.push(c);
+      if (w.k === 'morn') xs.reverse(); else if (a && SUNSET_SPOTS.has(a.id) && xs.includes(sunAt)) xs.unshift(sunAt);
+      return xs; };
     for (const w of wins) for (const c of starts(w, r.dur)) { const f = fits(c, r.dur, id); if (f) { place(w, c, r.dur, f); return; } }
     // nothing fits at full length: a shorter visit (at least 1 hour) before closing time
     if (a) for (const w of wins) for (const c of starts(w, 60)) {
@@ -4751,6 +4808,7 @@ function renderPlan() {
     <div class="row" style="padding:4px 0"><h2 class="grow" style="margin:6px 0">${dayLabel(iso)}</h2>
       <button class="ghost" data-act="toggleWork">${m.wOn ? 'Work day' : 'Day off'}</button></div>
     <div class="muted" style="margin:-4px 2px 4px">${m.rows.length} stop${m.rows.length === 1 ? '' : 's'} · ${m.rows.filter(r => r.status === 'booked').length} booked${m.wOn ? ' · work ' + fmtMin(m.ws) + ' to ' + fmtMin(m.we) : ''}</div>
+    ${renderDayWx(iso)}
     ${m.wOn ? (spot => `<button class="card wfrom" data-act="openWork">${ic('bag')}<div class="grow"><b>Working from</b>
       <div class="muted">${spot ? esc(spot.name) : 'Optional: add it to see your route to and from work'}</div></div><span class="more">${spot ? 'Change' : 'Set'}</span></button>`)(workSpot(iso)) : ''}
     ${bookingStrip(iso)}
@@ -5210,6 +5268,7 @@ function render() {
   if (tab === 'plan' || tab === 'budget') { const c = document.querySelector('#daychips .chip.on'), row = document.getElementById('daychips');
     if (c && row) row.scrollLeft = c.offsetLeft - row.offsetLeft - (row.clientWidth - c.offsetWidth) / 2; }
   if (tab === 'plan' && document.getElementById('map')) initMap(); else if (leafMap) { try { leafMap.remove(); } catch (e) {} leafMap = null; }
+  if (tab === 'plan') wxRefresh();
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === (ui.backTo ? ui.backTo.tab : tab)));
   const days = tripDays();
   const titles = {explore:'Explore', budget:'Budget', plan:'Plan', docs:'Docs'};
