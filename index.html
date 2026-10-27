@@ -134,7 +134,10 @@
   .ag-row { display:flex; gap:var(--s3); }
   .ag-t { width:44px; flex:none; font-size:12px; font-weight:700; color:var(--muted); padding-top:14px; }
   .ag-c { flex:1; min-width:0; display:flex; flex-direction:column; gap:6px; padding-bottom:var(--s2); }
-  .ag-work { height:56px; border-radius:12px; border:1px dashed var(--muted); background:repeating-linear-gradient(45deg,var(--soft),var(--soft) 6px,transparent 6px,transparent 12px); display:flex; align-items:center; justify-content:space-between; padding:0 14px; font-size:14px; }
+  .ag-work { width:100%; min-height:56px; border-radius:12px; border:1px dashed var(--muted); background:repeating-linear-gradient(45deg,var(--soft),var(--soft) 6px,transparent 6px,transparent 12px); display:flex; align-items:center; justify-content:space-between; gap:var(--s2); padding:var(--s2) 14px; font:inherit; font-size:14px; color:var(--ink); text-align:left; cursor:pointer; }
+  .wfrom { display:flex; align-items:center; gap:var(--s3); width:100%; font:inherit; color:var(--ink); text-align:left; cursor:pointer; }
+  .wres { display:block; width:100%; padding:var(--s2) var(--s3); margin-top:6px; border:1px solid var(--line); border-radius:12px; background:var(--bg); color:var(--ink); font:inherit; text-align:left; cursor:pointer; }
+  .wres .muted { font-size:12px; }
   .ag-free { border:1px dashed var(--line); border-radius:12px; padding:8px 12px; color:var(--muted); font-size:13px; text-align:center; }
   .ag-card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:var(--s3) 14px; display:flex; flex-direction:column; gap:4px; }
   .ag-card.bad { border-color:var(--warn); }
@@ -817,6 +820,7 @@
   		}
   	}
   
+  .pin.work, .sn.work{background:var(--hi);color:#1a1a1a}
   .pin{width:28px;height:28px;border-radius:50%;background:var(--accent);color:var(--on-accent);font-size:13px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2px solid var(--card);box-shadow:0 1px 4px rgba(0,0,0,.35)}
   .leaflet-container{font:inherit}
   .leaflet-touch .leaflet-bar a { width:44px; height:44px; line-height:44px; font-size:22px; }
@@ -3295,6 +3299,7 @@ const DEFAULT_STATE = {
   notes: {},            // {placeId: 'my notes'}
   customActs: [],       // activities you add yourself
   plan: {},             // {'2026-11-14': [{id, actId, text, done, booked, status, docId}]}  status: idea | booked | cancelled
+  workFrom: {},         // {'2026-11-16': {placeId} or {id, name, label, lat, lng}}  where you work that day (optional)
   expenses: [],         // [{id, date, amt, note}]
   docs: [
     {id:'d1', type:'id', f:{}, title:'Passport', conf:'', notes:'', checks:[{t:'Valid 6+ months after trip',d:false},{t:'Photo of passport page saved offline',d:false}]},
@@ -4068,6 +4073,16 @@ function fmtMin(n) { n = Math.max(0, Math.min(1439, n)); return String(Math.floo
 function isWeekend(iso) { const d = new Date(iso + 'T12:00:00').getDay(); return d === 0 || d === 6; }
 function workOn(iso) { const o = (state.workOverride || {})[iso]; return o === undefined ? !isWeekend(iso) : o; }
 function workTimes() { const w = state.work || {}; return [toMin(w.s || '10:00'), toMin(w.e || '18:00')]; }
+// Where you work on a work day: an Explore place, or a café/address found by search. null when not set.
+function workSpot(iso) {
+  const s = (state.workFrom || {})[iso]; if (!s || !workOn(iso)) return null;
+  if (s.placeId) { const a = actById(s.placeId); return a ? {a, name: a.name, q: placeQuery(a)} : null; }
+  return {a: {id: s.id, name: s.name, area: s.area || '', city: '', transit: null, cat: 'work'}, name: s.name, q: s.label || s.name};
+}
+// The city a day is probably in, from its planned places (used to search near the right city)
+function dayCity(iso) { const a = (state.plan[iso] || []).map(it => it.actId && actById(it.actId)).find(Boolean); return a ? a.city : 'São Paulo'; }
+// The most recent earlier work day with a work spot, for "Same as ..."
+function prevWorkFrom(iso) { return Object.keys(state.workFrom || {}).filter(d => d < iso && workOn(d)).sort().pop() || null; }
 // Older items only had "booked" (true/false); status adds "cancelled"
 const itemStatus = it => it.status || (it.booked ? 'booked' : 'idea');
 const itemName = it => { const a = it.actId ? actById(it.actId) : null; return a ? a.name : (it.text || '(removed place)'); };
@@ -4183,6 +4198,42 @@ function renderTimeSheet() {
         <button class="btn grow" data-act="closeTime">Done</button></div>
     </div>`;
 }
+// Bottom sheet for "Working from": search a café or address, pick an Explore place, or leave it empty
+function renderWorkSheet() {
+  if (!ui.workSheet) return '';
+  const iso = ui.planDay, spot = workSpot(iso), prev = prevWorkFrom(iso), prevSpot = prev && workSpot(prev);
+  const groups = ['São Paulo', 'Rio de Janeiro'].map(c => `<optgroup label="${c}">${allActs().filter(a => a.city === c && !NO_PIN.has(a.id))
+    .map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}</optgroup>`).join('');
+  const res = (ui.wfResults || []).map((r, i) => `<button class="wres" data-act="wfPickResult" data-i="${i}"><b>${esc(r.name)}</b><div class="muted">${esc(r.label)}</div></button>`).join('');
+  return `<div class="backdrop" data-act="closeWork"></div>
+    <div class="sheet" role="dialog" aria-label="Working from"><div class="grab" aria-hidden="true"></div>
+      <div class="row"><b class="grow" style="font-size:18px">Working from · ${dayLabel(iso)}</b><button class="x" data-act="closeWork" aria-label="Close">×</button></div>
+      <div class="tnow">${spot ? `<b>${esc(spot.name)}</b>` : '<b>Not set</b> · optional'}</div>
+      <div class="ilabel" style="margin-top:var(--s3)">Search a café, cowork or address</div>
+      <div class="row"><input id="wfQ" enterkeyhint="search" placeholder="e.g. Starbucks Paulista, or Rua Augusta 1500" value="${esc(ui.wfQ || '')}"><button class="btn" data-act="wfSearch">Search</button></div>
+      ${ui.wfMsg ? `<div class="muted" style="margin-top:6px" aria-live="polite">${esc(ui.wfMsg)}</div>` : ''}${res}
+      <div class="ilabel" style="margin-top:var(--s4)">Or pick a place from Explore</div>
+      <div class="row"><select id="wfPlace"><option value="">Choose a place…</option>${groups}</select><button class="btn" data-act="wfPickPlace">Use</button></div>
+      ${prevSpot && (!spot || prevSpot.a.id !== spot.a.id) ? `<button class="ghost" style="margin-top:var(--s3)" data-act="wfSame">Same as ${dayLabel(prev)}: ${esc(prevSpot.name)}</button>` : ''}
+      <div class="row" style="margin-top:var(--s4)">
+        ${spot ? `<button class="ghost" data-act="wfClear">Leave empty</button>` : ''}
+        <button class="btn grow" data-act="closeWork">Done</button></div>
+      <p class="muted">The work spot becomes a stop on this day's route: morning, then work, then evening. Searching needs internet; results come from OpenStreetMap.</p>
+    </div>`;
+}
+const CITY_BOX = {'São Paulo': '-46.83,-23.40,-46.36,-23.75', 'Rio de Janeiro': '-43.80,-22.75,-43.10,-23.08'};   // search near this city first
+async function workSearch() {
+  const el = document.getElementById('wfQ'), q = (el ? el.value : ui.wfQ || '').trim(); ui.wfQ = q;
+  if (!q) return;
+  ui.wfResults = []; ui.wfMsg = 'Searching…'; render();
+  try {
+    const box = CITY_BOX[dayCity(ui.planDay)] || '';
+    const j = await fetchT('https://nominatim.openstreetmap.org/search?format=json&limit=5&countrycodes=br' + (box ? '&viewbox=' + box : '') + '&q=' + encodeURIComponent(q), 'json', {}, 15000);
+    ui.wfResults = j.map(r => ({name: r.name || r.display_name.split(',')[0], label: r.display_name, lat: +r.lat, lng: +r.lon}));
+    ui.wfMsg = ui.wfResults.length ? 'Tap the right one:' : 'Nothing found. Try adding the street or neighbourhood.';
+  } catch (e) { ui.wfMsg = 'Could not search (no internet?). You can pick a place from Explore instead.'; }
+  if (ui.workSheet) render();
+}
 // Every plan item that has this document attached, by date
 function docUses(id) {
   const out = [];
@@ -4225,6 +4276,7 @@ function renderTimeline(m) {
   ev.sort((x, y) => x.t - y.t || (x.bk ? -1 : 1));
   if (!ev.length) return `<div class="card muted">No times set yet. Add a place to this day, then set a start time below or tap "Suggest times".</div>`;
   let html = '', prev = null;
+  const spot = m.wOn ? workSpot(ui.planDay) : null;
   ev.forEach(x => {
     if (x.bk) {   // a booking marker doesn't break the walk/metro legs between plan items
       if (prev && x.t - prev.e >= 30) html += `<div class="ag-row"><div class="ag-t"></div><div class="ag-c"><div class="ag-free">Free · ${fmtDur(x.t - prev.e)}</div></div></div>`;
@@ -4235,12 +4287,15 @@ function renderTimeline(m) {
     }
     if (prev && x.t - prev.e >= 30) html += `<div class="ag-row"><div class="ag-t"></div><div class="ag-c"><div class="ag-free">Free · ${fmtDur(x.t - prev.e)}</div></div></div>`;
     if (x.work) {
-      html += `<div class="ag-row"><div class="ag-t">${fmtMin(x.t)}</div><div class="ag-c"><div class="ag-work"><b>Work</b><span>${fmtMin(m.ws)} to ${fmtMin(m.we)}</span></div></div></div>`;
+      const fromItem = spot && prev && prev.r && prev.r.a ? prev.r : null;
+      html += `<div class="ag-row"><div class="ag-t">${fmtMin(x.t)}</div><div class="ag-c">${fromItem ? legLine(fromItem, {a: spot.a}) : ''}
+        <button class="ag-work" data-act="openWork" aria-label="Change where you work"><b>Work${spot ? ' · ' + esc(spot.name) : ''}</b><span>${fmtMin(m.ws)} to ${fmtMin(m.we)}</span></button></div></div>`;
     } else {
-      const r = x.r, prevItem = prev && prev.r && !prev.work ? prev.r : null;
+      // after the work block, the leg starts at the work spot (with no work spot there is no leg across work)
+      const r = x.r, prevItem = prev && prev.work ? (spot ? {a: spot.a} : null) : prev && prev.r ? prev.r : null;
       const tag = r.status === 'booked' ? '<span class="tag okTag">Booked</span>' : '<span class="tag">Idea</span>';
       html += `<div class="ag-row"><div class="ag-t">${fmtMin(r.start)}</div><div class="ag-c">
-        ${prevItem && r.a ? legLine(prevItem, r) : ''}
+        ${prevItem && prevItem.a && r.a ? legLine(prevItem, r) : ''}
         <div class="ag-card ${r.warns.length ? 'bad' : ''} ${r.it.done ? 'done' : ''}"${r.a ? ` data-act="openPlace" data-id="${r.a.id}" role="button" tabindex="0" aria-label="Open the place page for ${esc(r.name)}"` : ''}>
           <div class="row"><b class="grow">${esc(r.name)}</b>${r.it.done ? '<span class="tag okTag">Done</span>' : tag}${r.a ? '<span class="more">›</span>' : ''}</div>
           <div class="muted">${fmtMin(r.start)} to ${fmtMin(r.end % 1440)} · ${fmtDur(r.dur)}${r.a && cardStation(r.a) ? ' · ' + esc(cardStation(r.a)) : ''}</div>
@@ -4296,6 +4351,7 @@ const NO_PIN = new Set(['futebolmatch']);   // don't search for these
 function coordsLoad() {
   let c = {}; try { c = JSON.parse(localStorage.getItem('trip-coords-v1')) || {}; } catch (e) {}
   for (const [id, p] of Object.entries(PINS)) c[id] = {lat: p[0], lng: p[1]};
+  for (const s of Object.values(state.workFrom || {})) if (s.id && s.lat != null) c[s.id] = {lat: s.lat, lng: s.lng};   // searched work spots
   return c;
 }
 function coordsSave(c) { try { localStorage.setItem('trip-coords-v1', JSON.stringify(c)); } catch (e) {} }
@@ -4304,9 +4360,18 @@ function gmapsDir(origin, dest, mode, waypoints) {
   return 'https://www.google.com/maps/dir/?api=1&origin=' + encodeURIComponent(origin) + '&destination=' + encodeURIComponent(dest) +
     '&travelmode=' + mode + (waypoints && waypoints.length ? '&waypoints=' + encodeURIComponent(waypoints.join('|')) : '');
 }
+// The route's stops in time order. On a work day the work spot sits between morning and evening;
+// with no work spot, the last morning stop gets gapAfter, so no leg is drawn straight across the work hours.
 function dayStops() {
-  const m = planModel(ui.planDay);
-  return m.sched.concat(m.unsched).filter(r => r.a).map((r, i) => ({n: i + 1, a: r.a, q: placeQuery(r.a), start: r.start}));
+  const iso = ui.planDay, m = planModel(iso), spot = m.wOn ? workSpot(iso) : null;
+  let list = m.sched.filter(r => r.a).map(r => ({a: r.a, q: placeQuery(r.a), start: r.start}));
+  if (m.wOn) {
+    const before = list.filter(s => s.start < m.ws), after = list.filter(s => s.start >= m.ws);
+    if (spot) list = before.concat({a: spot.a, q: spot.q, start: m.ws, end: m.we, work: true}, after);
+    else if (before.length && after.length) before[before.length - 1].gapAfter = true;
+  }
+  list = list.concat(m.unsched.filter(r => r.a).map(r => ({a: r.a, q: placeQuery(r.a), start: null})));
+  return list.map((s, i) => Object.assign(s, {n: i + 1}));
 }
 function distKm(p, q) {
   const R = 6371, rad = x => x * Math.PI / 180, dLat = rad(q.lat - p.lat), dLng = rad(q.lng - p.lng);
@@ -4356,9 +4421,17 @@ function legsHtml() {
   const co = coordsLoad(), rt = routesLoad();
   let h = '';
   stops.forEach((A, i) => {
-    h += `<div class="stop"><span class="sn" aria-hidden="true">${A.n}</span><div class="grow"><b>${esc(A.a.name)}</b>
+    h += A.work ? `<div class="stop"><span class="sn work" aria-hidden="true">${A.n}</span><div class="grow"><b>Work · ${esc(A.a.name)}</b>
+      <div class="muted">${fmtMin(A.start)} to ${fmtMin(A.end)}${A.a.area ? ' · ' + esc(A.a.area) : ''}</div></div></div>`
+      : `<div class="stop"><span class="sn" aria-hidden="true">${A.n}</span><div class="grow"><b>${esc(A.a.name)}</b>
       <div class="muted">${A.start !== null ? fmtMin(A.start) : 'No time yet'}${A.a.area ? ' · ' + esc(A.a.area) : ''}</div></div></div>`;
     const B = stops[i + 1]; if (!B) return;
+    if (A.gapAfter) {
+      const [ws, we] = workTimes();
+      h += `<div class="leg none">${ic('bag')}<div class="grow"><b>Work</b> · ${fmtMin(ws)} to ${fmtMin(we)}
+        <div class="muted">No route across your work hours. Set "Working from" above to see the legs to and from work.</div></div></div>`;
+      return;
+    }
     const L = legData(A, B, co, rt);
     let cls = 'leg', body;
     if (L.kind === 'walk') body = `${ic('walk')}<div class="grow"><b>Walk ${L.min} min</b> · ${fmtDist(L.km)}${L.exact ? '' : ' <span class="muted">(estimate)</span>'}</div>`;
@@ -4403,7 +4476,7 @@ function drawMap(map) {
   const teal = css.getPropertyValue('--accent').trim() || '#1B6D3F', orange = css.getPropertyValue('--action').trim() || '#002776';
   for (let i = 0; i < stops.length - 1; i++) {
     const A = stops[i], B = stops[i + 1], L2 = legData(A, B, co, rt), ca = co[A.a.id], cb = co[B.a.id];
-    if (!ca || !cb) continue;
+    if (!ca || !cb || A.gapAfter) continue;
     if (L2.kind === 'walk' && L2.route && L2.route.line) {
       L.polyline(L2.route.line, {color: teal, weight: 5, opacity: .9}).addTo(mapLayer);
       L2.route.line.forEach(p => pts.push(p));
@@ -4416,8 +4489,8 @@ function drawMap(map) {
   stops.forEach(s => {
     const c = co[s.a.id]; if (!c) return;
     pts.push([c.lat, c.lng]);
-    L.marker([c.lat, c.lng], {icon: L.divIcon({className: '', html: `<div class="pin">${s.n}</div>`, iconSize: [28, 28], iconAnchor: [14, 14]})})
-      .bindPopup(`<b>${esc(s.a.name)}</b>${s.start !== null ? '<br>' + fmtMin(s.start) : ''}`).addTo(mapLayer);
+    L.marker([c.lat, c.lng], {icon: L.divIcon({className: '', html: `<div class="pin${s.work ? ' work' : ''}">${s.n}</div>`, iconSize: [28, 28], iconAnchor: [14, 14]})})
+      .bindPopup(`<b>${s.work ? 'Work · ' : ''}${esc(s.a.name)}</b>${s.start !== null ? '<br>' + fmtMin(s.start) + (s.work ? ' to ' + fmtMin(s.end) : '') : ''}`).addTo(mapLayer);
   });
   if (pts.length) map.fitBounds(pts, {padding: [30, 30], maxZoom: 16});
   const legs = document.getElementById('legs'); if (legs) legs.innerHTML = legsHtml();
@@ -4452,7 +4525,7 @@ async function initMap() {
   for (let i = 0; i < stops.length - 1; i++) {
     if (leafMap !== map) return;
     const A = stops[i], B = stops[i + 1], co2 = coordsLoad(), rt = routesLoad(), key = A.a.id + '|' + B.a.id;
-    if (rt[key] || !co2[A.a.id] || !co2[B.a.id] || distKm(co2[A.a.id], co2[B.a.id]) > 8) continue;
+    if (A.gapAfter || rt[key] || !co2[A.a.id] || !co2[B.a.id] || distKm(co2[A.a.id], co2[B.a.id]) > 8) continue;
     if (status) status.textContent = `Finding walking routes… ${i + 1}/${stops.length - 1}`;
     try {
       const u = `https://routing.openstreetmap.de/routed-foot/route/v1/driving/${co2[A.a.id].lng},${co2[A.a.id].lat};${co2[B.a.id].lng},${co2[B.a.id].lat}?overview=simplified&geometries=geojson`;
@@ -4484,6 +4557,8 @@ function renderPlan() {
     <div class="row" style="padding:4px 0"><h2 class="grow" style="margin:6px 0">${dayLabel(iso)}</h2>
       <button class="ghost" data-act="toggleWork">${m.wOn ? 'Work day' : 'Day off'}</button></div>
     <div class="muted" style="margin:-4px 2px 4px">${m.rows.length} stop${m.rows.length === 1 ? '' : 's'} · ${m.rows.filter(r => r.status === 'booked').length} booked${m.wOn ? ' · work ' + fmtMin(m.ws) + ' to ' + fmtMin(m.we) : ''}</div>
+    ${m.wOn ? (spot => `<button class="card wfrom" data-act="openWork">${ic('bag')}<div class="grow"><b>Working from</b>
+      <div class="muted">${spot ? esc(spot.name) : 'Optional: add it to see your route to and from work'}</div></div><span class="more">${spot ? 'Change' : 'Set'}</span></button>`)(workSpot(iso)) : ''}
     ${bookingStrip(iso)}
     ${renderDayMap()}
     ${renderRouteSheet()}
@@ -4921,9 +4996,10 @@ function renderDocs() {
 
 function render() {
   if (tab !== 'explore') { ui.sheet = false; ui.draft = null; }
+  if (tab !== 'plan') ui.workSheet = false;
   if (!(tab === 'explore' && ui.detail)) ui.daySheet = false;
   const fn = {explore:renderExplore, budget:renderBudget, plan:renderPlan, docs:renderDocs}[tab];
-  document.getElementById('main').innerHTML = fn() + (tab === 'plan' ? renderDocSheet() + renderTimeSheet() : '') + (tab === 'budget' ? renderToast() : '') + (tab === 'docs' ? renderDocEdit() + renderEmEdit() : '');
+  document.getElementById('main').innerHTML = fn() + (tab === 'plan' ? renderDocSheet() + renderTimeSheet() + renderWorkSheet() : '') + (tab === 'budget' ? renderToast() : '') + (tab === 'docs' ? renderDocEdit() + renderEmEdit() : '');
   if (tab === 'budget') expPreview();
   if (tab === 'docs' || tab === 'plan') loadDocAtts();
   if (tab === 'explore' && ui.detail) refreshPhotos();
@@ -4972,6 +5048,15 @@ const actions = {
   planView: t => { ui.planView = t.dataset.v; },
   toggleWork: () => { (state.workOverride ||= {})[ui.planDay] = !workOn(ui.planDay); },
   autoArrange: () => { const left = autoArrange(ui.planDay); if (left) alert(left + ' item(s) did not fit around your work block. Try a weekend day or set a time by hand.'); },
+  openWork: () => { ui.workSheet = true; ui.wfResults = []; ui.wfMsg = ''; },
+  closeWork: () => { ui.workSheet = false; },
+  wfSearch: () => { workSearch(); return false; },
+  wfPickResult: t => { const r = ui.wfResults[+t.dataset.i]; if (!r) return false;
+    (state.workFrom ||= {})[ui.planDay] = {id: 'w' + uid(), name: r.name, label: r.label, area: r.label.split(',').slice(1, 3).join(',').trim(), lat: r.lat, lng: r.lng};
+    ui.workSheet = false; },
+  wfPickPlace: () => { const v = document.getElementById('wfPlace').value; if (!v) return false; (state.workFrom ||= {})[ui.planDay] = {placeId: v}; ui.workSheet = false; },
+  wfSame: () => { const p = prevWorkFrom(ui.planDay); if (!p) return false; state.workFrom[ui.planDay] = Object.assign({}, state.workFrom[p]); ui.workSheet = false; },
+  wfClear: () => { delete (state.workFrom || {})[ui.planDay]; ui.workSheet = false; },
   openTime: t => { ui.timeSheet = t.dataset.id; },
   closeTime: () => { ui.timeSheet = null; },
   setHour: t => { const i = findPlanItem(ui.timeSheet); if (!i) return false; const m = i.start ? i.start.split(':')[1] : '00'; i.start = String(t.dataset.v).padStart(2, '0') + ':' + m; },
@@ -5175,6 +5260,8 @@ document.getElementById('main').addEventListener('click', e => {
   save(); render();
 });
 // Text boxes and dropdowns save when you finish typing / choose (without redrawing, so the keyboard stays open)
+document.getElementById('main').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'wfQ') { e.preventDefault(); workSearch(); } });
+document.getElementById('main').addEventListener('input', e => { if (e.target.id === 'wfQ') ui.wfQ = e.target.value; });
 document.getElementById('main').addEventListener('input', e => { const a = e.target.dataset.act; if (a === 'docField') docFieldInput(e.target); else if (a === 'emField') emFieldInput(e.target); });
 document.getElementById('main').addEventListener('change', e => {
   const t = e.target, a = t.dataset.act;
