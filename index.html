@@ -138,6 +138,7 @@
   .wfrom { display:flex; align-items:center; gap:var(--s3); width:100%; font:inherit; color:var(--ink); text-align:left; cursor:pointer; }
   .wres { display:block; width:100%; padding:var(--s2) var(--s3); margin-top:6px; border:1px solid var(--line); border-radius:12px; background:var(--bg); color:var(--ink); font:inherit; text-align:left; cursor:pointer; }
   .wres .muted { font-size:12px; }
+  .why { font-size:13px; color:var(--muted); margin-top:6px; padding-left:var(--s2); border-left:3px solid var(--hi); }
   .ag-free { border:1px dashed var(--line); border-radius:12px; padding:8px 12px; color:var(--muted); font-size:13px; text-align:center; }
   .ag-card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:var(--s3) 14px; display:flex; flex-direction:column; gap:4px; }
   .ag-card.bad { border-color:var(--warn); }
@@ -4086,6 +4087,51 @@ function prevWorkFrom(iso) { return Object.keys(state.workFrom || {}).filter(d =
 // Older items only had "booked" (true/false); status adds "cancelled"
 const itemStatus = it => it.status || (it.booked ? 'booked' : 'idea');
 const itemName = it => { const a = it.actId ? actById(it.actId) : null; return a ? a.name : (it.text || '(removed place)'); };
+/* ---- Opening hours, read from each place's short hours line, e.g. "Tue–Sun 10–18 · Thu until 20 · Mon closed" ---- */
+const HOLIDAYS = ['2026-11-15', '2026-11-20'];
+const DOW3 = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+const DAYW = '(mon|tue|wed|thu|fri|sat|sun)(?:[a-z]*days?)?';   // "Sat", "Saturdays"; not "sunset"
+function hoursRules(text) {
+  return String(text || '').split('·').map(seg => {
+    const s = seg.toLowerCase(), days = new Set(), di = w => DOW3.indexOf(w);
+    const rest = s.replace(new RegExp('\\b' + DAYW + '\\s*[–-]\\s*' + DAYW + '\\b', 'g'), (m, x, y) => {
+      for (let i = di(x), k = 0; k < 7; i = (i + 1) % 7, k++) { days.add(i); if (i === di(y)) break; }
+      return ' ';
+    });
+    for (const x of rest.matchAll(new RegExp('\\b' + DAYW + '\\b', 'g'))) days.add(di(x[1]));
+    if (/\bdaily\b|every day/.test(s)) DOW3.forEach((_, i) => days.add(i));
+    if (/\bweekends?\b/.test(s)) { days.add(0); days.add(6); }
+    if (/\bweekdays?\b/.test(s)) [1, 2, 3, 4, 5].forEach(i => days.add(i));
+    // time ranges like "10–18", "11:30–00", "20–01" (past midnight); "1–2 h" is a duration, not hours
+    const rs = [...s.matchAll(/(\d{1,2})(?::(\d{2}))?\s*[–-]\s*(\d{1,2})(?::(\d{2}))?(?!\d)(?!\s*h\b)/g)].map(x => {
+      const o = +x[1] * 60 + +(x[2] || 0); let c = +x[3] * 60 + +(x[4] || 0); if (c <= o) c += 1440; return [o, c]; });
+    const until = !rs.length && s.match(/until (\d{1,2})(?::(\d{2}))?/);
+    const air = !rs.length && /open-air|any time/.test(s);
+    return {days: days.size ? days : null, hol: /holiday/.test(s), air,
+      open: rs.length ? Math.min(...rs.map(r => r[0])) : null, close: rs.length ? Math.max(...rs.map(r => r[1])) : null,
+      closed: !rs.length && /closed/.test(s), until: until ? +until[1] * 60 + +(until[2] || 0) : null,
+      vague: !days.size && !rs.length && !air};
+  });
+}
+// {open, close} in minutes for a place on a date; {closed: true}; or {known: false} when the hours line doesn't say
+function openingFor(a, iso) {
+  const dow = new Date(iso + 'T12:00:00').getDay(), hol = HOLIDAYS.includes(iso);
+  const rules = hoursRules(a.hoursShort), hits = r => r.days ? r.days.has(dow) || (r.hol && hol) : true;
+  let res = null, sawDays = false, vague = false;
+  for (const r of rules) {
+    if (r.closed && r.days && hits(r)) return {closed: true, known: true};
+    if (r.open !== null || r.air) {
+      if (r.days) sawDays = true;
+      if (!res && hits(r)) res = r.air ? {open: 0, close: 1440, known: true, air: true} : {open: r.open, close: r.close, known: true};
+    } else if (r.vague) vague = true;
+  }
+  if (res) { const u = rules.find(r => r.until !== null && r.days && hits(r)); if (u) res.close = Math.max(res.close, u.until); return res; }
+  // only listed for other days: closed, unless the full hours list mentions this day (the short line can leave days out)
+  const named = (a.hours || []).some(h => new RegExp('\\b' + ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][dow] + '[a-z]*day', 'i').test(h));
+  return sawDays && !vague && !named ? {closed: true, known: true} : {known: false};
+}
+// Before-work places: the early opening time from their note ("park opens at 5:00")
+function earlyOpen(a) { const x = (BEFORE_WORK[a.id] || '').match(/(\d{1,2}):(\d{2})/); return x ? +x[1] * 60 + +x[2] : null; }
 function planModel(iso) {
   const [ws, we] = workTimes(), wOn = workOn(iso);
   const all = (state.plan[iso] || []).map(it => {
@@ -4101,30 +4147,77 @@ function planModel(iso) {
     if (wOn && r.start < we && r.end > ws) r.warns.push('Overlaps your work block');
     sched.forEach(o => { if (o !== r && r.start < o.end && r.end > o.start && !r.warns.includes('Overlaps another item')) r.warns.push('Overlaps another item'); });
     if (r.a) {
+      const oh = openingFor(r.a, iso), early = r.a.morn ? earlyOpen(r.a) : null;
       if (isWeekend(iso) && r.a.wknd === false) r.warns.push('Marked as not good for weekends');
-      if (r.start >= 18 * 60 && r.a.eve === false) r.warns.push('May be closed in the evening');
+      if (oh.closed) r.warns.push('Closed on this day (' + r.a.hoursShort + ')');
+      else if (oh.known && !oh.air && ((r.start < oh.open && !(early !== null && r.start >= early)) || r.end > oh.close))
+        r.warns.push(`Outside opening hours (${fmtMin(oh.open)}–${fmtMin(oh.close % 1440)})`);
+      else if (!oh.known && r.start >= 18 * 60 && r.a.eve === false) r.warns.push('May be closed in the evening');
     }
   });
   return {rows, sched, unsched: rows.filter(r => r.start === null), cancelled: all.filter(r => r.status === 'cancelled'), ws, we, wOn};
 }
+// Travel minutes between two places (by id): a walk up to WALK_MAX_MIN, else a rough metro time. null if a pin is missing.
+function travelBetween(idA, idB) {
+  if (!idA || !idB) return null;
+  if (idA === idB) return {min: 0, how: 'walk'};
+  const co = coordsLoad(), p = co[idA], q = co[idB]; if (!p || !q) return null;
+  const d = distKm(p, q), r = routesLoad()[idA + '|' + idB], walk = r ? r.min : Math.round(d * 1.3 / 4.5 * 60);
+  return walk <= WALK_MAX_MIN ? {min: walk, how: 'walk'} : {min: Math.round(15 + d * 2.5), how: 'metro'};   // ~15 min to the platform, then ~24 km/h
+}
+const travelText = t => ({walk: `${t.min} min walk`, metro: `~${t.min} min by metro`, nowork: 'about 30 min (set "Working from" for a real estimate)'}[t.how] || `about ${t.min} min`);
+// "Suggest times": places unscheduled items around work, opening hours and travel, and notes why on each one.
+// Returns the items it could not fit, each with the reason.
 function autoArrange(iso) {
-  const m = planModel(iso);
-  const windows = m.wOn ? [[m.we + 30, 23 * 60 + 30], [8 * 60, m.ws]] : [[9 * 60, 22 * 60]];
-  const busy = m.sched.map(r => [r.start, r.end]); if (m.wOn) busy.push([m.ws, m.we]);
-  let left = 0;
-  m.unsched.slice().sort((x, y) => (x.a && x.a.cat === 'nightlife/music') - (y.a && y.a.cat === 'nightlife/music')).forEach(r => {
-    const night = r.a && r.a.cat === 'nightlife/music';
-    let placed = false;
-    for (const [a, b] of windows) {
-      let c = night ? Math.max(a, 19 * 60 + 30) : a;
-      for (let guard = 0; guard < 50 && c + r.dur <= b; guard++) {
-        const hit = busy.find(([x, y]) => c < y && c + r.dur > x);
-        if (!hit) { r.it.start = fmtMin(c); busy.push([c, c + r.dur]); placed = true; break; }
-        c = hit[1] + 30;
-      }
-      if (placed) break;
+  const m = planModel(iso), spot = m.wOn ? workSpot(iso) : null;
+  const busy = m.sched.map(r => ({s: r.start, e: r.end, id: r.a ? r.a.id : null, name: r.name}));
+  if (m.wOn) busy.push({s: m.ws, e: m.we, id: spot ? spot.a.id : null, work: true, name: 'work'});
+  const hop = (b, id) => (b.work && !b.id ? {min: 30, how: 'nowork'} : travelBetween(b.id, id)) || {min: 20, how: 'guess'};
+  // c..c+dur must be free, with time to travel from the block before and to the block after
+  const fits = (c, dur, id) => {
+    if (busy.some(b => c < b.e && c + dur > b.s)) return null;
+    const before = busy.filter(b => b.e <= c).sort((x, y) => y.e - x.e)[0], after = busy.filter(b => b.s >= c + dur).sort((x, y) => x.s - y.s)[0];
+    const tIn = before && hop(before, id), tOut = after && hop(after, id);
+    if (before && c < before.e + tIn.min) return null;
+    if (after && c + dur + tOut.min > after.s) return null;
+    return {before, tIn, after, tOut};
+  };
+  const LATE = 23 * 60 + 30, NIGHT = 19 * 60 + 30, offLabel = isWeekend(iso) ? 'Weekend' : 'Day off';
+  const jobs = m.unsched.map(r => {
+    const a = r.a, night = !!a && a.cat === 'nightlife/music', oh = a ? openingFor(a, iso) : {known: false};
+    const open = oh.known ? oh.open : night ? NIGHT : 9 * 60;
+    const close = oh.known ? oh.close : night ? 25 * 60 : a && a.eve ? 22 * 60 : 18 * 60;
+    return {r, a, night, oh, open, close};
+  }).sort((x, y) => (x.night - y.night) || (x.close - y.close));   // earliest closing first, nights last
+  const left = [];
+  jobs.forEach(({r, a, night, oh, open, close}) => {
+    if (oh.closed) { left.push({name: r.name, why: `closed on this day (${a.hoursShort})`}); return; }
+    const id = a ? a.id : null, from = night ? Math.max(open, NIGHT) : open;
+    const hrs = !a ? 'your own item' : !oh.known ? 'hours not confirmed, check first' : oh.air ? 'open-air' : `open ${fmtMin(oh.open)}–${fmtMin(oh.close % 1440)}`;
+    const lastStart = night ? LATE : 21 * 60;   // no museum or park visits starting late at night
+    const wins = m.wOn ? [{k: 'eve', s: Math.max(from, m.we), e: close}] : [{k: 'day', s: Math.max(from, 9 * 60), e: close}];
+    // before work only for places marked "Before work" (open early); those try the morning first
+    if (m.wOn && a && a.morn && !night) wins.unshift({k: 'morn', s: Math.max(Math.min(open, earlyOpen(a) ?? open), 6 * 60), e: Math.min(close, m.ws)});
+    if (!a) wins.splice(0, wins.length, ...(m.wOn ? [{k: 'eve', s: m.we, e: LATE + 60}, {k: 'morn', s: 8 * 60, e: m.ws}] : [{k: 'day', s: 9 * 60, e: 22 * 60}]));
+    const place = (w, c, dur, f) => {
+      r.it.start = fmtMin(c); busy.push({s: c, e: c + dur, id, name: r.name});
+      const short = dur < r.dur ? `. Shortened to ${fmtDur(dur)} to fit before closing` : '';
+      if (short) r.it.dur = dur;
+      const prevTxt = f.before && !f.before.work ? `; ${travelText(f.tIn)} from ${f.before.name}` : '';
+      r.it.why = (w.k === 'morn' ? `Before work: ${a ? BEFORE_WORK[a.id] : 'free time'}; then ${f.after && f.after.work ? travelText(f.tOut) + ' to work' : 'on to your next stop'}`
+        : w.k === 'eve' ? `${night ? 'Night out' : 'After work'}: ${f.before && f.before.work ? travelText(f.tIn) + ' from work' : 'after ' + (f.before ? f.before.name : 'work')}; ${hrs}`
+        : `${offLabel}${night ? ', night out' : ''}: ${hrs}${prevTxt}`) + short;
+    };
+    // mornings fill from the end, so you aren't up at 6:00 for nothing; other windows fill from the start
+    const starts = (w, dur) => { const xs = []; for (let c = Math.ceil(w.s / 15) * 15; c + dur <= w.e && c <= (w.k === 'morn' ? LATE : lastStart); c += 15) xs.push(c); return w.k === 'morn' ? xs.reverse() : xs; };
+    for (const w of wins) for (const c of starts(w, r.dur)) { const f = fits(c, r.dur, id); if (f) { place(w, c, r.dur, f); return; } }
+    // nothing fits at full length: a shorter visit (at least 1 hour) before closing time
+    if (a) for (const w of wins) for (const c of starts(w, 60)) {
+      const dur = Math.min(r.dur, Math.floor((w.e - c) / 15) * 15), f = dur >= 60 && fits(c, dur, id);
+      if (f) { place(w, c, dur, f); return; }
     }
-    if (!placed) left++;
+    left.push({name: r.name, why: m.wOn && a && !a.morn && close <= m.we + 30 ? `closes at ${fmtMin(close % 1440)}, before you finish work, and it isn't a before-work place`
+      : m.wOn && a && a.morn ? 'no free slot before or after work' : 'no free slot left that day'});
   });
   return left;
 }
@@ -4142,6 +4235,7 @@ function itemCard(r) {
     <button class="timebtn" data-act="openTime" data-id="${it.id}" aria-label="Change time for ${esc(r.name)}">${ic('clock')}
       <span class="grow">${r.start !== null ? `<b>${fmtMin(r.start)} – ${fmtMin(r.end % 1440)}</b>` : '<b>No time yet</b>'}<span class="muted"> · ${fmtDur(r.dur)}</span></span>
       <span class="edit">${r.start !== null ? 'Change' : 'Set time'}</span></button>
+    ${it.why && r.start !== null ? `<div class="why"><b>Why this time:</b> ${esc(it.why)}</div>` : ''}
     <div class="seg" role="group" aria-label="Status">${seg}</div>
     <label class="muted docpick">Attach document<select data-act="setDoc" data-id="${it.id}"><option value="">None</option>${docOpts}</select></label>
     ${docChip(it)}
@@ -4299,6 +4393,7 @@ function renderTimeline(m) {
         <div class="ag-card ${r.warns.length ? 'bad' : ''} ${r.it.done ? 'done' : ''}"${r.a ? ` data-act="openPlace" data-id="${r.a.id}" role="button" tabindex="0" aria-label="Open the place page for ${esc(r.name)}"` : ''}>
           <div class="row"><b class="grow">${esc(r.name)}</b>${r.it.done ? '<span class="tag okTag">Done</span>' : tag}${r.a ? '<span class="more">›</span>' : ''}</div>
           <div class="muted">${fmtMin(r.start)} to ${fmtMin(r.end % 1440)} · ${fmtDur(r.dur)}${r.a && cardStation(r.a) ? ' · ' + esc(cardStation(r.a)) : ''}</div>
+          ${r.it.why ? `<div class="why">${esc(r.it.why)}</div>` : ''}
           ${docChip(r.it)}
           ${r.warns.map(w => `<div class="ag-warn">${ic('warn')}<span>${esc(w)}</span></div>`).join('')}
         </div></div></div>`;
@@ -4566,7 +4661,7 @@ function renderPlan() {
       <button class="chip ${view === 'timeline' ? 'on' : ''}" data-act="planView" data-v="timeline">Timeline</button>
       <button class="chip ${view === 'list' ? 'on' : ''}" data-act="planView" data-v="list">List by time</button></div>
     ${view === 'timeline' ? renderTimeline(m) : renderListView(m)}
-    ${m.unsched.length ? `<button class="btn" style="width:100%" data-act="autoArrange">Suggest times for ${m.unsched.length} unscheduled</button><p class="muted">Rough suggestions that fit around work. Change any time you like.</p>` : ''}
+    ${m.unsched.length ? `<button class="btn" style="width:100%" data-act="autoArrange">Suggest times for ${m.unsched.length} unscheduled</button><p class="muted">${m.wOn ? 'Fits around your work hours, opening hours and travel to and from work.' : 'Fits around opening hours and travel between stops.'} Each suggestion says why. Change any time you like.</p>` : ''}
     <h3 style="margin:14px 0 0">Items for this day</h3>
     ${ordered.map(itemCard).join('') || '<p class="muted">Nothing planned for this day yet. Add places from Explore or below.</p>'}
     <div class="card"><b>Add to this day</b>
@@ -5047,7 +5142,8 @@ const actions = {
   applyFilters: () => { if (ui.draft) { ui.mode = ui.draft.mode; ui.cat = ui.draft.cat; } ui.sheet = false; ui.draft = null; },
   planView: t => { ui.planView = t.dataset.v; },
   toggleWork: () => { (state.workOverride ||= {})[ui.planDay] = !workOn(ui.planDay); },
-  autoArrange: () => { const left = autoArrange(ui.planDay); if (left) alert(left + ' item(s) did not fit around your work block. Try a weekend day or set a time by hand.'); },
+  autoArrange: () => { const left = autoArrange(ui.planDay);
+    if (left.length) alert('Could not find a time for:\n' + left.map(x => `• ${x.name}: ${x.why}`).join('\n') + '\n\nTry another day, or set a time by hand.'); },
   openWork: () => { ui.workSheet = true; ui.wfResults = []; ui.wfMsg = ''; },
   closeWork: () => { ui.workSheet = false; },
   wfSearch: () => { workSearch(); return false; },
@@ -5059,10 +5155,10 @@ const actions = {
   wfClear: () => { delete (state.workFrom || {})[ui.planDay]; ui.workSheet = false; },
   openTime: t => { ui.timeSheet = t.dataset.id; },
   closeTime: () => { ui.timeSheet = null; },
-  setHour: t => { const i = findPlanItem(ui.timeSheet); if (!i) return false; const m = i.start ? i.start.split(':')[1] : '00'; i.start = String(t.dataset.v).padStart(2, '0') + ':' + m; },
-  setMinute: t => { const i = findPlanItem(ui.timeSheet); if (!i) return false; const h = i.start ? i.start.split(':')[0] : '18'; i.start = h + ':' + String(t.dataset.v).padStart(2, '0'); },
+  setHour: t => { const i = findPlanItem(ui.timeSheet); if (!i) return false; delete i.why; const m = i.start ? i.start.split(':')[1] : '00'; i.start = String(t.dataset.v).padStart(2, '0') + ':' + m; },
+  setMinute: t => { const i = findPlanItem(ui.timeSheet); if (!i) return false; delete i.why; const h = i.start ? i.start.split(':')[0] : '18'; i.start = h + ':' + String(t.dataset.v).padStart(2, '0'); },
   setLen: t => { const i = findPlanItem(ui.timeSheet); if (i) i.dur = +t.dataset.v; },
-  clearTime: () => { const i = findPlanItem(ui.timeSheet); if (i) delete i.start; },
+  clearTime: () => { const i = findPlanItem(ui.timeSheet); if (i) { delete i.start; delete i.why; } },
   fetchOne: t => { const a = actById(t.dataset.id); t.textContent = 'Fetching…';
     fetchPlacePhotos(a).then(k => { t.textContent = k ? `Added ${k}` : 'Nothing found'; refreshPhotos(); }).catch(() => { t.textContent = 'No internet'; }); return false; },
   fetchAll: t => { fetchAllPhotos(t); return false; },
