@@ -913,6 +913,16 @@
   .kvs { display:flex; flex-direction:column; margin-bottom:var(--s3); border:1px solid var(--line); border-radius:12px; padding:2px var(--s3); }
   .kv { display:flex; justify-content:space-between; align-items:center; gap:var(--s3); width:100%; min-height:var(--tap); padding:6px 0; border:0; border-top:1px solid var(--line); background:none; color:var(--ink); font:inherit; font-size:14px; text-align:left; cursor:copy; }
   .kv:active .kvv { color:var(--accent); }
+  .idstat { display:flex; gap:var(--s2); align-items:flex-start; width:100%; margin:0 0 var(--s3); padding:10px 12px; border:0; border-radius:12px; font:inherit; font-size:14px; font-weight:600; text-align:left; background:var(--soft); color:var(--ink); }
+  .idstat > span { display:flex; flex-direction:column; gap:2px; }
+  .idstat .muted { font-size:13px; font-weight:400; }
+  .idstat .ri { width:18px; height:18px; margin:1px 0 0; stroke:currentColor; flex:none; }
+  .idstat.ok { background:var(--ok-bg); color:var(--ok-ink); }
+  .idstat.warn { background:var(--warn-bg); color:var(--warn); }
+  .idstat.bad { background:var(--warn-bg); color:var(--warn); border:2px solid var(--warn); }
+  .idstat.top { margin-top:var(--s2); }
+  .kv.secret .kvv { letter-spacing:.1em; color:var(--muted); }
+  .kv.secret .kvv b { letter-spacing:0; margin-left:6px; color:var(--accent); }
   .docacts { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 var(--s3); }
   .docacts .act { gap:6px; text-decoration:none; color:var(--ink); }
   .docacts .act .ri { width:18px; height:18px; margin:0; }
@@ -4324,6 +4334,24 @@ const DOC_TYPES = {
 DOC_TYPES.event.fields.push(['phone', 'Phone', 'tel']);
 for (const [k, t] of Object.entries(DOC_TYPES)) if (k !== 'id') t.fields.push(['link', 'Booking link', 'url']);
 const docType = d => DOC_TYPES[d.type] || DOC_TYPES.other;
+// Passport / ID: is it valid for the trip? 'bad' = expires before the trip ends, 'warn' = within 6 months after it
+function idStatus(d) {
+  if (d.type !== 'id') return null;
+  const exp = d.f && d.f.expiry, days = tripDays(), end = days[days.length - 1];
+  if (!exp) return {level: 'none', msg: 'Add the expiry date with Edit so the app can check it against your trip.'};
+  const six = new Date(end + 'T12:00:00'); six.setMonth(six.getMonth() + 6);
+  if (exp < end) return {level: 'bad', msg: `Expires ${fDate(exp)}, before your trip ends (${fDate(end)}). Renew it before you travel.`};
+  if (exp < six.toISOString().slice(0, 10)) return {level: 'warn', msg: `Expires ${fDate(exp)}, less than 6 months after your trip. Some countries ask for 6 months' validity.`};
+  return {level: 'ok', msg: `Valid for the whole trip (expires ${fDate(exp)}).`};
+}
+function idBanner(d) {
+  const s = idStatus(d); if (!s) return '';
+  return `<div class="idstat ${s.level}">${ic(s.level === 'ok' ? 'check' : s.level === 'none' ? 'cal' : 'warn')}<span>${esc(s.msg)}
+    <span class="muted">Check Brazil's entry rules for your nationality before you fly.</span></span></div>`;
+}
+// fields that stay hidden until tapped, so they can't be read over your shoulder
+const SECRET = {id: ['number'], insurance: []};
+const isSecret = (d, k) => (SECRET[d.type] || []).includes(k);
 // One-tap actions for a booking: open the place in Google Maps, call or WhatsApp, open the booking link
 function docActions(d) {
   const f = d.f || {}, out = [];
@@ -4418,8 +4446,11 @@ function renderNextUp() {
 }
 // filled-in fields as label/value rows
 // each row is a button: tap to copy that value (door code, Wi-Fi, address...)
+// (secret fields like a passport number show dots until tapped, then hide again after 30 seconds)
 const docFields = d => docType(d).fields.filter(([k]) => d.f && d.f[k]).map(([k, l, ty]) =>
-  `<button class="kv" data-act="copyField" data-id="${d.id}" data-k="${k}" aria-label="Copy ${l}"><span class="muted">${l}</span><span class="kvv">${ty === 'date' ? fDate(d.f[k]) : esc(d.f[k])}</span></button>`).join('');
+  isSecret(d, k) && !(ui.reveal && ui.reveal.id === d.id)
+    ? `<button class="kv secret" data-act="revealField" data-id="${d.id}" aria-label="Show ${l}"><span class="muted">${l}</span><span class="kvv">•••• •••• <b>Show</b></span></button>`
+    : `<button class="kv" data-act="copyField" data-id="${d.id}" data-k="${k}" aria-label="Copy ${l}"><span class="muted">${l}</span><span class="kvv">${ty === 'date' ? fDate(d.f[k]) : esc(d.f[k])}</span></button>`).join('');
 // Bottom sheet to edit every field of a booking (works on a draft; nothing changes until Save)
 function renderDocEdit() {
   const e = ui.docEdit; if (!e) return '';
@@ -4558,6 +4589,7 @@ function renderDocs() {
         ${d.conf ? '<span class="tag okTag">Booked</span>' : ''}
         <button class="ghost" data-act="editDoc" data-id="${d.id}" aria-label="Edit ${esc(d.title)}">Edit</button></div>
       ${docFields(d) ? `<div class="kvs">${docFields(d)}</div>` : `<button class="addinfo" data-act="editDoc" data-id="${d.id}">${ic('note')}Add the ${T.label.toLowerCase()} details</button>`}
+      ${idBanner(d)}
       ${docActions(d)}
       ${d.notes ? `<div class="docnotes">${esc(d.notes)}</div>` : ''}
       ${T.code ? `<label class="ilabel" for="conf-${d.id}">${T.code}</label>
@@ -4586,7 +4618,9 @@ function renderDocs() {
     + section('Documents', docsOnly) + section('No date yet', undated, 'add a date with Edit');
   const empty = `<div class="card empty big-empty">${ic('note')}<div><b>No documents yet</b>
     <div class="muted">Add your flights, stays and bus tickets so their confirmation numbers are one tap away, even offline.</div></div></div>`;
-  return renderNextUp() + (cards || empty) + `<div class="card"><b>Add a booking or document</b>
+  const idAlerts = state.docs.filter(d => { const s = idStatus(d); return s && (s.level === 'bad' || s.level === 'warn'); })
+    .map(d => `<button class="idstat ${idStatus(d).level} top" data-act="jumpDoc" data-id="${d.id}">${ic('warn')}<span><b>${esc(d.title)}</b> · ${esc(idStatus(d).msg)}</span></button>`).join('');
+  return idAlerts + renderNextUp() + (cards || empty) + `<div class="card"><b>Add a booking or document</b>
       <div class="grid2" style="margin-top:var(--s2)">
         <label class="muted">Name<input id="newDoc" placeholder="Travel insurance"></label>
         <label class="muted">Type<select id="newDocType">${Object.entries(DOC_TYPES).map(([k, t]) => `<option value="${k}">${t.label}</option>`).join('')}</select></label>
@@ -4807,6 +4841,10 @@ const actions = {
   },
   delDoc: t => { if (confirm('Delete this booking and its files?')) { state.docs = state.docs.filter(d => d.id !== t.dataset.id); photosSet(attKey(t.dataset.id), []).catch(() => {}); ui.docEdit = null; } else return false; },
   openAtt: t => { openAtt(t.dataset.id, +t.dataset.i); return false; },
+  revealField: t => {
+    const at = Date.now(); ui.reveal = {id: t.dataset.id, at};
+    setTimeout(() => { if (ui.reveal && ui.reveal.at === at) { ui.reveal = null; if (tab === 'docs' || tab === 'plan') render(); } }, 30000);
+  },
   copyField: t => {
     const d = state.docs.find(x => x.id === t.dataset.id); if (!d || !d.f) return false;
     const v = t.querySelector('.kvv'), shown = v.textContent;
