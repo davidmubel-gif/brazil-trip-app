@@ -13,7 +13,7 @@ on its home screen like a normal app. There is no app store, no account and no s
 
 The app has four tabs:
 
-- **Explore**: 60 places (museums, parks, neighbourhoods, nightlife, day trips) with hours,
+- **Explore**: 61 places (museums, parks, neighbourhoods, nightlife, day trips) with hours,
   prices, the nearest metro station, photos and notes. Places can be filtered and starred.
 - **Budget**: a daily allowance in Brazilian reais (BRL), converted to Colombian pesos (COP), with an expense list.
 - **Plan**: a rough plan for each day, shown as a timeline. It includes the fixed work block
