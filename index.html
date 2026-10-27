@@ -3137,6 +3137,20 @@ const PLACES = [
    Everything you enter lives in one object called "state".
    It is saved on your phone (localStorage) after every change, so it works offline. */
 
+/* Good before work: places I can visit on a weekday morning and still start work at 10:00
+   (open by about 8:00, or open-air). The reason shows on the place page. Checked Oct 27, 2026;
+   Cemitério da Consolação left out because its general opening hours couldn't be confirmed. */
+const BEFORE_WORK = {
+  ibirapuera: 'park opens at 5:00', villalobos: 'park opens at 5:30', independencia: 'park opens at 5:00 (the museum opens later)',
+  beco: 'open-air street art, quiet early', porsol: 'open-air square (best at sunset, calm in the morning)',
+  bandeiras: 'open-air monument by Ibirapuera', estaiada: 'view the bridge any time', copan: 'see the building outside any time (rooftop is Saturdays only)',
+  mercado: 'opens at 6:00, good for breakfast', rua25: 'most stores open around 8:00', saobento: 'opens at 6:00; Gregorian-chant mass at 7:00 on weekdays',
+  se: 'church opens around 7:30–8:00 on weekdays (sources vary)', luz: 'Jardim da Luz opens at 6:00 (closed Mondays)',
+  arpoador: 'open-air rock, sunrise is lovely too', selaron: 'open-air, far fewer people early', praias: 'open-air, early morning swim or walk',
+  urca: 'Pista Cláudio Coutinho opens around 6:00', jbrj: 'gardens open at 8:00 (Wednesdays at 11:00)', lage: 'opens at 8:00',
+  saobentorio: 'Gregorian-chant mass at 7:15, Monday to Saturday', pedradosal: 'open-air historic square, calm in daytime'
+};
+PLACES.forEach(a => { a.morn = !!BEFORE_WORK[a.id]; });
 const DEFAULT_STATE = {
   rate: 750,            // COP per 1 BRL. CHANGE THIS to today's rate in the Budget tab.
   daily: 300,           // daily allowance in BRL
@@ -3222,6 +3236,7 @@ async function loadCardPhotos() {
 function previewCount(d) {
   let l = allActs().filter(a => ui.city === 'All' || a.city === ui.city);
   if (d.cat !== 'all') l = l.filter(a => a.cat === d.cat);
+  if (d.mode === 'morn') l = l.filter(a => a.morn);
   if (d.mode === 'eve') l = l.filter(a => a.eve);
   if (d.mode === 'wknd') l = l.filter(a => a.wknd);
   return l.length;
@@ -3233,9 +3248,10 @@ function renderExplore() {
     ui.detail = null;
   }
   const cities = ['All', 'São Paulo', 'Rio de Janeiro'];
-  const modes = [['any','Any time'], ['eve','After work'], ['wknd','Weekend days']];
+  const modes = [['any','Any time'], ['morn','Before work'], ['eve','After work'], ['wknd','Weekend days']];
   let list = allActs().filter(a => ui.city === 'All' || a.city === ui.city);
   if (ui.cat !== 'all') list = list.filter(a => a.cat === ui.cat);
+  if (ui.mode === 'morn') list = list.filter(a => a.morn);
   if (ui.mode === 'eve') list = list.filter(a => a.eve);
   if (ui.mode === 'wknd') list = list.filter(a => a.wknd);
   const chips = cities.map(c => `<button class="chip ${ui.city===c?'on':''}" data-act="city" data-v="${c}">${c === 'Rio de Janeiro' ? 'Rio' : c}</button>`).join('');
@@ -3265,7 +3281,7 @@ function renderExplore() {
         </div>
         <div class="muted pc-area">${esc(a.area || a.city)}${a.area ? ' · ' + (a.city === 'Rio de Janeiro' ? 'Rio' : 'SP') : ''}</div>
         ${a.short ? `<div class="pc-short">${esc(a.short)}</div>` : ''}
-        <div class="pc-tags">${a.cat?`<span class="tag">${esc(CAT_LABEL[a.cat] || a.cat)}</span>`:''}${a.free?'<span class="tag">Free</span>':''}${st?`<span class="tag">${esc(st)}</span>`:''}${a.eve?'<span class="tag">After work</span>':''}${a.wknd?'<span class="tag">Weekend</span>':''}${a.check?'<span class="tag warnTag">Check hours</span>':''}</div>
+        <div class="pc-tags">${a.cat?`<span class="tag">${esc(CAT_LABEL[a.cat] || a.cat)}</span>`:''}${a.free?'<span class="tag">Free</span>':''}${st?`<span class="tag">${esc(st)}</span>`:''}${a.morn?'<span class="tag">Before work</span>':''}${a.eve?'<span class="tag">After work</span>':''}${a.wknd?'<span class="tag">Weekend</span>':''}${a.check?'<span class="tag warnTag">Check hours</span>':''}</div>
       </div>
     </div>`; }).join('') || '<p class="muted">Nothing matches this filter.</p>';
   setTimeout(loadCardPhotos, 0);
@@ -3355,7 +3371,8 @@ function renderDetail(a) {
     </div>
     <h2 class="title">${esc(a.fullName || a.name)}</h2>
     <div class="muted">${esc(a.area ? a.area + ' · ' : '')}${esc(a.city)}</div>
-    <div class="pc-tags" style="margin:8px 0">${a.cat?`<span class="tag">${esc(CAT_LABEL[a.cat] || a.cat)}</span>`:''}${a.free?'<span class="tag">Free</span>':''}${a.eve?'<span class="tag">After work</span>':''}${a.wknd?'<span class="tag">Weekend</span>':''}</div>
+    <div class="pc-tags" style="margin:8px 0">${a.cat?`<span class="tag">${esc(CAT_LABEL[a.cat] || a.cat)}</span>`:''}${a.free?'<span class="tag">Free</span>':''}${a.morn?'<span class="tag">Before work</span>':''}${a.eve?'<span class="tag">After work</span>':''}${a.wknd?'<span class="tag">Weekend</span>':''}</div>
+    ${a.morn && BEFORE_WORK[a.id] ? `<div class="muted" style="margin:-2px 0 8px">Before work: ${esc(BEFORE_WORK[a.id])}</div>` : ''}
     ${msg}
     ${a.check ? `<div class="card warn irow" style="margin:12px 0">${ic('warn')}<div>${esc(a.check)}</div></div>` : ''}
     ${a.short ? `<p style="margin:12px 0">${esc(a.short)}</p>` : ''}
